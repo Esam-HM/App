@@ -21,7 +21,7 @@ from .shape import Shape
 from .widgets import (BrightnessContrastDialog, Canvas, FileDialogPreview,
                              LabelDialog, LabelListWidget, LabelListWidgetItem, ToolBar,
                              UniqueLabelQListWidget,
-                             ZoomWidget,)
+                             ZoomWidget, DirectorySelector,)
 from . import utils
 
 LABEL_COLORMAP = imgviz.label_colormap()
@@ -505,6 +505,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Delete the selected polygons"),
             enabled=False,
         )
+        deleteAll = action(
+            self.tr("Delete All Polygons"),
+            self.deleteAllShapes,
+            shortcuts["delete_all"],
+            "delete",
+            self.tr("Delete all polygons in image (Shift+Delete)"),
+            enabled=False,
+        )
         duplicate = action(
             self.tr("Duplicate Polygons"),
             self.duplicateSelectedShape,
@@ -640,6 +648,20 @@ class MainWindow(QtWidgets.QMainWindow):
             enabled=False,
         )
 
+        ## XXX
+        fillGapVideo = action(
+            self.tr("&Fill Video Gaps"),
+            None,
+            tip=self.tr("Fill gaps in video between two non-empty frames(only for labels with same ID numbers)"),
+            enabled=False,
+        )
+        extractFrames = action(
+            self.tr("Extract Frames"),
+            self.extractFramesDialog,
+            "open",
+            self.tr("Extract frames of a video to a directory"),
+        )
+
         # Store actions for further handling.
         self.actions = utils.struct(
             open=open_,
@@ -664,6 +686,7 @@ class MainWindow(QtWidgets.QMainWindow):
             toggleKeepPrevMode=toggle_keep_prev_mode,
             edit=edit,
             delete=delete,
+            deleteAll=deleteAll,
             duplicate=duplicate,
             copy=copy,
             paste=paste,
@@ -688,6 +711,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 copy,
                 paste,
                 delete,
+                deleteAll,
                 None,
                 undoLastPoint,
                 None,
@@ -723,7 +747,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 editMode,
                 brightnessContrast,
             ),
-            onShapesPresent=(saveAs, hideAll, showAll, toggleAll),
+            onShapesPresent=(saveAs, deleteAll, hideAll, showAll, toggleAll),
+            extractFrames=extractFrames,
         )
 
 
@@ -740,6 +765,7 @@ class MainWindow(QtWidgets.QMainWindow):
             createRectangleMode,
             editMode,
             delete,
+            deleteAll,
             None,
             brightnessContrast,
             None,
@@ -787,6 +813,7 @@ class MainWindow(QtWidgets.QMainWindow):
             openPrevImg,
             opendir,
             self.menus.recentFiles,
+            extractFrames,
             save,
             saveAs,
             saveAuto,
@@ -915,7 +942,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
         ### Mark file item if already has label file
         for filename in filenames:
-            labelfile = osp.splitext(filename)[0] + self.getlblFileExt
+            labelfile = osp.splitext(filename)[0] + ".json"
             if self.output_dir:
                 label_file_without_path = osp.basename(labelfile)
                 labelfile = osp.join(self.output_dir, label_file_without_path)
@@ -1232,6 +1259,90 @@ class MainWindow(QtWidgets.QMainWindow):
         elif len(self.recentFiles) >= self.maxRecent:
             self.recentFiles.pop()
         self.recentFiles.insert(0, filename)
+
+    ## Open Video File
+    def extractFramesDialog(self):
+        defaultDirPath = osp.dirname(str(self.filename)) if self.filename else "."
+        formats = [
+            "*.mp4",
+            "*.mkv",
+            "*.avi",
+        ]
+        filters = self.tr("Video files (%s)") % " ".join(
+            formats
+        )
+        selectedFilePath,_ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("%s - Choose Video Files") % __appname__,
+            defaultDirPath,
+            filters,
+        )
+        if selectedFilePath:
+            videoDialog = QtWidgets.QDialog(self)
+            videoDialog.setModal(True)
+            layout = QtWidgets.QVBoxLayout(videoDialog)
+            dirpathlabel = QtWidgets.QLabel("Select output directory: ")
+            dirsel = DirectorySelector()
+            dirsel.setPath(str(osp.splitext(selectedFilePath)[0]))
+            frratelayout = QtWidgets.QHBoxLayout()
+            frameratelabel = QtWidgets.QLabel(self.tr("Select FPS : "))
+            frameratepicker = QtWidgets.QSpinBox()
+            frameratepicker.setRange(1,100)
+            frameratepicker.setSingleStep(1)
+            frameratepicker.setValue(5)
+            frratelayout.addWidget(frameratelabel)
+            frratelayout.addWidget(frameratepicker)
+            layout.addWidget(dirpathlabel)
+            layout.addWidget(dirsel)
+            layout.addLayout(frratelayout)
+            extbutton = QtWidgets.QPushButton("Extract")
+            extbutton.clicked.connect(videoDialog.accept)
+            layout.addWidget(extbutton, alignment = Qt.AlignCenter)
+            if videoDialog.exec() == QtWidgets.QDialog.Accepted:
+                self.extractVideo(selectedFilePath,dirsel.getPath(),frameratepicker.value())
+
+    def extractVideo(self, videopath, dirpath, framerate):
+        if not os.path.exists(dirpath):
+            os.makedirs(dirpath)
+
+        cap = cv2.VideoCapture(videopath)
+        if not cap.isOpened():
+            self.errorMessage("Error","Error: Could not open video file.")
+            return
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        # Calculate frame interval based on desired framerate
+        frame_interval = int(round(fps / framerate))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frame_count = 0
+        frame_num = 0
+        progress = QtWidgets.QProgressDialog("Extracting Video", "Cancel", 0, (int)(total_frames/frame_interval),self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)      ## show progress
+        # Read and save frames
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if progress.wasCanceled():
+                break
+
+            # Save frame if it's within the desired frame interval
+            if frame_num % frame_interval == 0 and frame is not None:
+                frame_filename = os.path.join(dirpath, f"frame_{frame_count}.jpg")
+                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                imgviz.io.imsave(frame_filename,image)  ##FIXED
+                #cv2.imwrite(frame_filename, frame) not working well.
+                frame_count += 1
+                progress.setValue(frame_count)
+
+            frame_num += 1
+        cap.release()
+        progress.setValue(int(total_frames/frame_interval))
+        self.status("Frames saved succesfully to %s" % dirpath)
+        
+        self.importDirImages(dirpath)
     
     ## Used to update recent files menu.
     def updateFileMenu(self):
@@ -1314,6 +1425,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self, self.tr("Attention"), msg, yes | no, yes
         ):
             self.remLabels(self.canvas.deleteSelected())
+            self.setDirty()
+            if self.noShapes():
+                for action in self.actions.onShapesPresent:
+                    action.setEnabled(False)
+
+    def deleteAllShapes(self):
+        yes, no = QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No
+        msg = self.tr(
+            "You are about to permanently delete polygons, " "proceed anyway?"
+        )
+        if yes == QtWidgets.QMessageBox.warning(
+            self, self.tr("Attention"), msg, yes | no, yes
+        ):
+            self.remLabels(self.canvas.deleteAllShapes())
             self.setDirty()
             if self.noShapes():
                 for action in self.actions.onShapesPresent:

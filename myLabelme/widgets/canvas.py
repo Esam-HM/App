@@ -648,6 +648,11 @@ class Canvas(QtWidgets.QWidget):
             self.selectedShapes = []
             self.update()
         return deleted_shapes
+    
+    def deleteAllShapes(self):
+        if self.shapes:
+            self.selectShapes(self.shapes)
+        return self.deleteSelected()
 
     def deleteShape(self, shape):
         if shape in self.selectedShapes:
