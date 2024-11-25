@@ -21,7 +21,7 @@ from .shape import Shape
 from .widgets import (BrightnessContrastDialog, Canvas, FileDialogPreview,
                              LabelDialog, LabelListWidget, LabelListWidgetItem, ToolBar,
                              UniqueLabelQListWidget,
-                             ZoomWidget)
+                             ZoomWidget,)
 from . import utils
 
 LABEL_COLORMAP = imgviz.label_colormap()
@@ -75,6 +75,18 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.filename = filename
         
+        
+        ### Getting saved vairables from settings.
+        self.settings = QtCore.QSettings("labelme", "labelme")
+        self.recentFiles = self.settings.value("recentFiles", []) or []
+        size = self.settings.value("window/size", QtCore.QSize(600, 500))
+        position = self.settings.value("window/position", QtCore.QPoint(0, 0))
+        state = self.settings.value("window/state", QtCore.QByteArray())
+        self.resize(size)
+        self.move(position)
+        self.restoreState(state)
+
+
         ### Getting saved vairables from settings.
         self.settings = QtCore.QSettings("labelme", "labelme")
         self.recentFiles = self.settings.value("recentFiles", []) or []
@@ -131,7 +143,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList.setContextMenuPolicy(Qt.CustomContextMenu)
         self.labelList.customContextMenuRequested.connect(self.popLabelListMenu)
 
-
         ## self.flag_dock = self.flag_widget = None
         self.flag_dock = QtWidgets.QDockWidget(self.tr("Flags"), self)
         self.flag_dock.setObjectName("Flags")
@@ -160,7 +171,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 rgb = self._get_rgb_by_label(label)
                 self.uniqLabelList.setItemLabel(item, label, rgb)
 
-        ## File list
+        # File list
         self.fileSearch = QtWidgets.QLineEdit()
         self.fileSearch.setPlaceholderText(self.tr("Search Filename"))
         self.fileListWidget = QtWidgets.QListWidget()
@@ -176,29 +187,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.file_dock.setWidget(fileListWidget)
         self.fileListWidget.itemSelectionChanged.connect(self.fileSelectionChanged)
         self.fileSearch.textChanged.connect(self.fileSearchChanged)
-        ### config
-        if config["file_search"]:
-            self.fileSearch.setText(config["file_search"])
-            self.fileSearchChanged()
-
-        ### Adding docks to right side of window
-        features = QtWidgets.QDockWidget.DockWidgetFeatures()
-        for dock in ["flag_dock", "label_dock", "shape_dock", "file_dock"]:
-            if self._config[dock]["closable"]:
-                features = features | QtWidgets.QDockWidget.DockWidgetClosable
-            if self._config[dock]["floatable"]:
-                features = features | QtWidgets.QDockWidget.DockWidgetFloatable
-            if self._config[dock]["movable"]:
-                features = features | QtWidgets.QDockWidget.DockWidgetMovable
-            getattr(self, dock).setFeatures(features)
-            if self._config[dock]["show"] is False:
-                getattr(self, dock).setVisible(False)
-
-        self.addDockWidget(Qt.RightDockWidgetArea, self.flag_dock)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.label_dock)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.shape_dock)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.file_dock)
         
+        ## config
+        if config["file_search"]:
+           self.fileSearch.setText(config["file_search"])
+           self.fileSearchChanged()
+
         ## Scroll Widget
         scrollArea = QtWidgets.QScrollArea()
         scrollArea.setWidgetResizable(True)
@@ -239,7 +233,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.zoomWidget.setEnabled(False)
         self.zoomWidget.valueChanged.connect(self.paintCanvas)
 
-
         ## Tool Bar
         self.tools = self.toolbar("Tools")
 
@@ -256,6 +249,36 @@ class MainWindow(QtWidgets.QMainWindow):
         self.menus.file.aboutToShow.connect(self.updateFileMenu)
 
         #############################
+
+        ### Adding docks to right side of window
+        features = QtWidgets.QDockWidget.DockWidgetFeatures()
+        for dock in ["flag_dock", "label_dock", "shape_dock", "file_dock"]:
+            if self._config[dock]["closable"]:
+                features = features | QtWidgets.QDockWidget.DockWidgetClosable
+            if self._config[dock]["floatable"]:
+                features = features | QtWidgets.QDockWidget.DockWidgetFloatable
+            if self._config[dock]["movable"]:
+                features = features | QtWidgets.QDockWidget.DockWidgetMovable
+            getattr(self, dock).setFeatures(features)
+            if self._config[dock]["show"] is False:
+                getattr(self, dock).setVisible(False)
+
+        self.addDockWidget(Qt.RightDockWidgetArea, self.flag_dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.label_dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.shape_dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.file_dock)
+        
+        ### Getting saved vairables from settings.
+        self.settings = QtCore.QSettings("labelme", "labelme")
+        self.recentFiles = self.settings.value("recentFiles", []) or []
+        size = self.settings.value("window/size", QtCore.QSize(600, 500))
+        position = self.settings.value("window/position", QtCore.QPoint(0, 0))
+        state = self.settings.value("window/state", QtCore.QByteArray())
+        self.resize(size)
+        self.move(position)
+        self.restoreState(state)
+
+        ################################################
 
         ########  Defining Actions  #########
         action = functools.partial(utils.newAction,self)
@@ -474,37 +497,33 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Modify the label of the selected polygon"),
             enabled=False,
         )
-        ## XXX XXX
         delete = action(
             self.tr("Delete Polygons"),
-            None,
+            self.deleteSelectedShape,
             shortcuts["delete_polygon"],
             "cancel",
             self.tr("Delete the selected polygons"),
             enabled=False,
         )
-        ## XXX
         duplicate = action(
             self.tr("Duplicate Polygons"),
-            None,
+            self.duplicateSelectedShape,
             shortcuts["duplicate_polygon"],
             "copy",
             self.tr("Create a duplicate of the selected polygons"),
             enabled=False,
         )
-        ## XXX
         copy = action(
             self.tr("Copy Polygons"),
-            None,
+            self.copySelectedShape,
             shortcuts["copy_polygon"],
             "copy_clipboard",
             self.tr("Copy selected polygons to clipboard"),
             enabled=False,
         )
-        ## XXX
         paste = action(
             self.tr("Paste Polygons"),
-            None,
+            self.pasteSelectedShape,
             shortcuts["paste_polygon"],
             "paste",
             self.tr("Paste copied polygons"),
@@ -547,20 +566,6 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if self._config["canvas"]["fill_drawing"]:
             fill_drawing.trigger()
-
-        ## XXX
-        fillGapVideo = action(
-            self.tr("&Fill Video Gaps"),
-            None,
-            tip=self.tr("Fill gaps in video between two non-empty frames(only for labels with same ID numbers)"),
-            enabled=False,
-        )
-        extractFrames = action(
-            self.tr("Extract Frames"),
-            self.extractFramesDialog,
-            "open",
-            self.tr("Extract frames of a video to a directory"),
-        )
 
         quit = action(
             self.tr("&Quit"), self.close,
@@ -641,7 +646,6 @@ class MainWindow(QtWidgets.QMainWindow):
             openNextImg=openNextImg,
             openPrevImg=openPrevImg,
             close=close,
-            extractFrames=extractFrames,
             changeOutputDir=changeOutputDir,
             save=save,
             saveAs=saveAs,
@@ -680,6 +684,10 @@ class MainWindow(QtWidgets.QMainWindow):
             # XXX: need to add some actions here to activate the shortcut
             editMenu=(
                 edit,
+                duplicate,
+                copy,
+                paste,
+                delete,
                 None,
                 undoLastPoint,
                 None,
@@ -696,6 +704,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 createAiMaskMode,
                 editMode,
                 edit,
+                duplicate,
+                copy,
+                paste,
+                delete,
                 undoLastPoint,
             ),
             onLoadActive=(
@@ -727,6 +739,7 @@ class MainWindow(QtWidgets.QMainWindow):
             None,
             createRectangleMode,
             editMode,
+            delete,
             None,
             brightnessContrast,
             None,
@@ -774,7 +787,6 @@ class MainWindow(QtWidgets.QMainWindow):
             openPrevImg,
             opendir,
             self.menus.recentFiles,
-            extractFrames,
             save,
             saveAs,
             saveAuto,
@@ -903,13 +915,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
         ### Mark file item if already has label file
         for filename in filenames:
-            labelfile = osp.splitext(filename)[0] + ".json"
+            labelfile = osp.splitext(filename)[0] + self.getlblFileExt
             if self.output_dir:
                 label_file_without_path = osp.basename(labelfile)
                 labelfile = osp.join(self.output_dir, label_file_without_path)
             item = QtWidgets.QListWidgetItem(filename)
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            if osp.exists(labelfile) and LabelFile.is_label_file(labelfile):
+            if osp.exists(labelfile) and (LabelFile.is_label_file(labelfile) or osp.splitext(labelfile)[1]==".txt"):
                 item.setCheckState(Qt.Checked)
             else:
                 item.setCheckState(Qt.Unchecked)
@@ -994,7 +1006,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.setEnabled(False)
         self.actions.saveAs.setEnabled(False)
     
-    ## Delete currently opened file.
+    ## Delete currently opened image's label file.
     def deleteFile(self):
         mb = QtWidgets.QMessageBox
         msg = self.tr(
@@ -1208,9 +1220,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status(str(self.tr("Loaded %s")) % osp.basename(str(filename)))
         return True
     
-    def loadTxtFile(self):
-        pass
-    
     ## Used when openning file from recent files menu.
     def loadRecent(self, filename):
         if self.mayContinue():
@@ -1223,90 +1232,6 @@ class MainWindow(QtWidgets.QMainWindow):
         elif len(self.recentFiles) >= self.maxRecent:
             self.recentFiles.pop()
         self.recentFiles.insert(0, filename)
-
-    ## Open Video File
-    def extractFramesDialog(self):
-        defaultDirPath = osp.dirname(str(self.filename)) if self.filename else "."
-        formats = [
-            "*.mp4",
-            "*.mkv",
-            "*.avi",
-        ]
-        filters = self.tr("Video files (%s)") % " ".join(
-            formats
-        )
-        selectedFilePath,_ = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            self.tr("%s - Choose Video Files") % __appname__,
-            defaultDirPath,
-            filters,
-        )
-        if selectedFilePath:
-            videoDialog = QtWidgets.QDialog(self)
-            videoDialog.setModal(True)
-            layout = QtWidgets.QVBoxLayout(videoDialog)
-            dirpathlabel = QtWidgets.QLabel("Select output directory: ")
-            dirsel = DirectorySelector()
-            dirsel.setPath(str(osp.splitext(selectedFilePath)[0]))
-            frratelayout = QtWidgets.QHBoxLayout()
-            frameratelabel = QtWidgets.QLabel(self.tr("Select FPS : "))
-            frameratepicker = QtWidgets.QSpinBox()
-            frameratepicker.setRange(1,100)
-            frameratepicker.setSingleStep(1)
-            frameratepicker.setValue(5)
-            frratelayout.addWidget(frameratelabel)
-            frratelayout.addWidget(frameratepicker)
-            layout.addWidget(dirpathlabel)
-            layout.addWidget(dirsel)
-            layout.addLayout(frratelayout)
-            extbutton = QtWidgets.QPushButton("Extract")
-            extbutton.clicked.connect(videoDialog.accept)
-            layout.addWidget(extbutton, alignment = Qt.AlignCenter)
-            if videoDialog.exec() == QtWidgets.QDialog.Accepted:
-                self.extractVideo(selectedFilePath,dirsel.getPath(),frameratepicker.value())
-
-    def extractVideo(self, videopath, dirpath, framerate):
-        if not os.path.exists(dirpath):
-            os.makedirs(dirpath)
-
-        cap = cv2.VideoCapture(videopath)
-        if not cap.isOpened():
-            self.errorMessage("Error","Error: Could not open video file.")
-            return
-
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        # Calculate frame interval based on desired framerate
-        frame_interval = int(round(fps / framerate))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_count = 0
-        frame_num = 0
-        progress = QtWidgets.QProgressDialog("Extracting Video", "Cancel", 0, (int)(total_frames/frame_interval),self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)      ## show progress
-        # Read and save frames
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            if progress.wasCanceled():
-                break
-
-            # Save frame if it's within the desired frame interval
-            if frame_num % frame_interval == 0 and frame is not None:
-                frame_filename = os.path.join(dirpath, f"frame_{frame_count}.jpg")
-                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                imgviz.io.imsave(frame_filename,image)  ##FIXED
-                #cv2.imwrite(frame_filename, frame) not working well.
-                frame_count += 1
-                progress.setValue(frame_count)
-
-            frame_num += 1
-        cap.release()
-        progress.setValue(int(total_frames/frame_interval))
-        self.status("Frames saved succesfully to %s" % dirpath)
-        
-        self.importDirImages(dirpath)
     
     ## Used to update recent files menu.
     def updateFileMenu(self):
@@ -1369,6 +1294,44 @@ class MainWindow(QtWidgets.QMainWindow):
         shape.select_line_color = QtGui.QColor(255, 255, 255)
         shape.select_fill_color = QtGui.QColor(r, g, b, 155)
 
+    def copyShape(self):
+        self.canvas.endMove(copy=True)
+        for shape in self.canvas.selectedShapes:
+            self.addLabel(shape)
+        self.labelList.clearSelection()
+        self.setDirty()
+
+    def moveShape(self):
+        self.canvas.endMove(copy=False)
+        self.setDirty()
+
+    def deleteSelectedShape(self):
+        yes, no = QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No
+        msg = self.tr(
+            "You are about to permanently delete {} polygons, " "proceed anyway?"
+        ).format(len(self.canvas.selectedShapes))
+        if yes == QtWidgets.QMessageBox.warning(
+            self, self.tr("Attention"), msg, yes | no, yes
+        ):
+            self.remLabels(self.canvas.deleteSelected())
+            self.setDirty()
+            if self.noShapes():
+                for action in self.actions.onShapesPresent:
+                    action.setEnabled(False)
+
+    def duplicateSelectedShape(self):
+        added_shapes = self.canvas.duplicateSelectedShapes()
+        for shape in added_shapes:
+            self.addLabel(shape)
+        self.setDirty()
+
+    def pasteSelectedShape(self):
+        self.loadShapes(self._copied_shapes, replace=False)
+        self.setDirty()
+
+    def copySelectedShape(self):
+        self._copied_shapes = [s.copy() for s in self.canvas.selectedShapes]
+        self.actions.paste.setEnabled(len(self._copied_shapes) > 0)
 
     ###############   Labels   ##################
     
@@ -1506,7 +1469,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 flag = item.checkState() == Qt.Unchecked
             item.setCheckState(Qt.Checked if flag else Qt.Unchecked)
 
-    ## label list item selected
+    ## triggered when label list item selected
     def labelSelectionChanged(self):
         if self._noSelectionSlot:
             return
@@ -1577,6 +1540,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def labelOrderChanged(self):
         self.setDirty()
         self.canvas.loadShapes([item.shape() for item in self.labelList])
+
+    def remLabels(self, shapes):
+        for shape in shapes:
+            item = self.labelList.findItemByShape(shape)
+            self.labelList.removeItem(item)
 
 
     ## Label validation
@@ -1970,7 +1938,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.canvas.undoLastLine()
             self.canvas.shapesBackups.pop()
 
-    ## XXX
     ## triggered when select or deselect shape on canvas.
     def shapeSelectionChanged(self, selected_shapes):
         self._noSelectionSlot = True
@@ -1986,8 +1953,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._noSelectionSlot = False
         n_selected = len(selected_shapes)
         self.actions.delete.setEnabled(n_selected)
-        #self.actions.duplicate.setEnabled(n_selected)
-        #self.actions.copy.setEnabled(n_selected)
+        self.actions.duplicate.setEnabled(n_selected)
+        self.actions.copy.setEnabled(n_selected)
         self.actions.edit.setEnabled(n_selected == 1)
 
     ## Update canvas size after zoom value changed.
