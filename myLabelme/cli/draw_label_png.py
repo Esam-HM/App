@@ -5,7 +5,7 @@ import imgviz
 import matplotlib.pyplot as plt
 import numpy as np
 
-from labelme.logger import logger
+from ..logger import logger
 
 
 def main():

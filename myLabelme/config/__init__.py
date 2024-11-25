@@ -3,7 +3,7 @@ import shutil
 
 import yaml     ## for configuration files.
 
-from labelme.logger import logger
+from ..logger import logger
 
 ## Current dir absolute path
 here = osp.dirname(osp.abspath(__file__))
