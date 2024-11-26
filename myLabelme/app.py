@@ -21,7 +21,8 @@ from .shape import Shape
 from .widgets import (BrightnessContrastDialog, Canvas, FileDialogPreview,
                              LabelDialog, LabelListWidget, LabelListWidgetItem, ToolBar,
                              UniqueLabelQListWidget,
-                             ZoomWidget, DirectorySelector,)
+                             ZoomWidget, DirectorySelector, 
+                             LabelFileTypeDialog,)
 from . import utils
 
 LABEL_COLORMAP = imgviz.label_colormap()
@@ -62,6 +63,13 @@ class MainWindow(QtWidgets.QMainWindow):
             Qt.Horizontal: {},
             Qt.Vertical: {},
         }  # key=filename, value=scroll_value
+        self.labelFileType = 0
+
+        self.lblFileLoaders = {
+            0: lambda x,y,z=False: self.loadAppJsonFile(x,y,z),
+            1: lambda x,y,z=False: self.loadTxtFile(x,y,z),
+            2: lambda x,y,_: QtWidgets.QMessageBox.information(self,"Info","Not Available Now"),
+        }
 
         if output_file is not None and self._config["auto_save"]:
             logger.warning(
@@ -74,28 +82,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.importDirImages(filename, load=False)
         else:
             self.filename = filename
-        
-        
-        ### Getting saved vairables from settings.
-        self.settings = QtCore.QSettings("labelme", "labelme")
-        self.recentFiles = self.settings.value("recentFiles", []) or []
-        size = self.settings.value("window/size", QtCore.QSize(600, 500))
-        position = self.settings.value("window/position", QtCore.QPoint(0, 0))
-        state = self.settings.value("window/state", QtCore.QByteArray())
-        self.resize(size)
-        self.move(position)
-        self.restoreState(state)
-
-
-        ### Getting saved vairables from settings.
-        self.settings = QtCore.QSettings("labelme", "labelme")
-        self.recentFiles = self.settings.value("recentFiles", []) or []
-        size = self.settings.value("window/size", QtCore.QSize(600, 500))
-        position = self.settings.value("window/position", QtCore.QPoint(0, 0))
-        state = self.settings.value("window/state", QtCore.QByteArray())
-        self.resize(size)
-        self.move(position)
-        self.restoreState(state)
 
         ### Setting Shape parameters.
         Shape.line_color = QtGui.QColor(*self._config["shape"]["line_color"])
@@ -661,6 +647,19 @@ class MainWindow(QtWidgets.QMainWindow):
             "open",
             self.tr("Extract frames of a video to a directory"),
         )
+        changeLblFileType = action(
+            self.tr("Change Label file Type"),
+            self.changeLabelFileType,
+            tip=self.tr("Select specific label file type to open it when load images"),
+        )
+        loadAnnotationFile = action(
+            self.tr("Load Annotation From File"),
+            self.openAnnotationFile,
+            None,
+            "objects",
+            self.tr("Select label file to load annotation to current image"),
+            enabled=False,
+        )
 
         # Store actions for further handling.
         self.actions = utils.struct(
@@ -726,6 +725,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 createLineStripMode,
                 createAiPolygonMode,
                 createAiMaskMode,
+                loadAnnotationFile,
                 editMode,
                 edit,
                 duplicate,
@@ -749,6 +749,8 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
             onShapesPresent=(saveAs, deleteAll, hideAll, showAll, toggleAll),
             extractFrames=extractFrames,
+            changeLblFileType=changeLblFileType,
+            loadAnnotationFile=loadAnnotationFile,
         )
 
 
@@ -818,6 +820,7 @@ class MainWindow(QtWidgets.QMainWindow):
             saveAs,
             saveAuto,
             changeOutputDir,
+            changeLblFileType,
             saveWithImageData,
             close,
             deleteFile,
@@ -942,7 +945,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
         ### Mark file item if already has label file
         for filename in filenames:
-            labelfile = osp.splitext(filename)[0] + ".json"
+            labelfile = osp.splitext(filename)[0] + self.getlblFileExt
             if self.output_dir:
                 label_file_without_path = osp.basename(labelfile)
                 labelfile = osp.join(self.output_dir, label_file_without_path)
@@ -1012,7 +1015,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for fmt in QtGui.QImageReader.supportedImageFormats()
         ]
         filters = self.tr("Image & Label files (%s)") % " ".join(
-            formats + ["*%s" % LabelFile.suffix]
+            formats + ["*%s" % self.getlblFileExt]
         )
         selectedFilePath, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -1106,7 +1109,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:    #### fixed
             currIndex = self.imageList.index(self.filename)
         except ValueError:
-            self.errorMessage("Error Opening Image","Current image not found in file list")
+            self.errorMessage("Error Opening Image","Current image not found in files list")
             self._config["keep_prev"] = keep_prev
             return
         if currIndex-1 >= 0:
@@ -1138,38 +1141,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("No such file: <b>%s</b>") % filename,
             )
             return False
+        
         # assumes same name, but json extension
         self.status(str(self.tr("Loading %s...")) % osp.basename(str(filename)))
-        label_file = osp.splitext(filename)[0] + ".json"
+        
+        label_file = osp.splitext(filename)[0] + self.getlblFileExt
         if self.output_dir:
             label_file_without_path = osp.basename(label_file)
             label_file = osp.join(self.output_dir, label_file_without_path)
-        ## Checks if .json label file found first in the same img path.
-        if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
-            try:
-                self.labelFile = LabelFile(label_file)
-            except LabelFileError as e:
-                self.errorMessage(
-                    self.tr("Error opening file"),
-                    self.tr(
-                        "<p><b>%s</b></p>"
-                        "<p>Make sure <i>%s</i> is a valid label file."
-                    )
-                    % (e, label_file),
-                )
-                self.status(self.tr("Error reading %s") % label_file)
-                return False
-            self.imageData = self.labelFile.imageData
-            self.imagePath = osp.join(
-                osp.dirname(label_file),
-                self.labelFile.imagePath,
-            )
-            self.otherData = self.labelFile.otherData
-        else:
-            self.imageData = LabelFile.load_image_file(filename)
-            if self.imageData:
-                self.imagePath = filename
-            self.labelFile = None
+
+        self.lblFileLoaders.get(self.labelFileType)(filename,label_file)
+
         image = QtGui.QImage.fromData(self.imageData)
 
         if image.isNull():
@@ -1246,6 +1228,61 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.setFocus()
         self.status(str(self.tr("Loaded %s")) % osp.basename(str(filename)))
         return True
+    
+    def loadAppJsonFile(self, filename, label_file, load=False):
+         ## Checks if .json label file found first in the same img path.
+        if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
+            try:
+                self.labelFile = LabelFile(label_file)
+            except LabelFileError as e:
+                self.errorMessage(
+                    self.tr("Error opening file"),
+                    self.tr(
+                        "<p><b>%s</b></p>"
+                        "<p>Make sure <i>%s</i> is a valid label file."
+                    )
+                    % (e, label_file),
+                )
+                self.status(self.tr("Error reading %s") % label_file)
+                return False
+            self.imageData = self.labelFile.imageData
+            self.imagePath = osp.join(
+                osp.dirname(label_file),
+                self.labelFile.imagePath,
+            )
+            self.otherData = self.labelFile.otherData
+            if load:
+                self.loadLabels(self.labelFile.shapes,load)
+                self.loadFlags(self.labelFile.flags)
+        else:
+            self.imageData = LabelFile.load_image_file(filename)
+            if self.imageData:
+                self.imagePath = filename
+            self.labelFile = None
+    
+    def loadTxtFile(self, filename=None, label_file=None, loadAnnOnly=False):
+        if not loadAnnOnly:
+            self.imageData = LabelFile.load_image_file(filename)
+            if not self.imageData:
+                return
+            self.imagePath = filename
+        if osp.exists(label_file) and osp.splitext(label_file)[1]==".txt":
+            self.labelFile = LabelFile()
+            self.labelFile.imageData = self.imageData
+            self.labelFile.imagePath = self.imagePath
+            self.labelFile.loadYoloTxtFile(label_file)
+            if loadAnnOnly:
+                self.loadLabels(self.labelFile.shapes,loadAnnOnly)
+        else:
+            self.labelFile = None
+           
+    
+    @property
+    def getlblFileExt(self):
+        if self.labelFileType==1:
+            return ".txt"
+        else:
+            return ".json"
     
     ## Used when openning file from recent files menu.
     def loadRecent(self, filename):
@@ -1461,7 +1498,7 @@ class MainWindow(QtWidgets.QMainWindow):
     ###############   Labels   ##################
     
     ## Setting shape objects to load it
-    def loadLabels(self, shapes):
+    def loadLabels(self, shapes, annsOnly=False):
         s = []
         for shape in shapes:
             label = shape["label"]
@@ -1499,7 +1536,28 @@ class MainWindow(QtWidgets.QMainWindow):
             shape.other_data = other_data
             s.append(shape)
         
-        self.loadShapes(s)
+        if annsOnly and not self.noShapes():
+            self.replaceShapes(s)   ## When loading annotation file separately.
+        else:
+            self.loadShapes(s)
+    
+    ## Ask user to replace current shapes or not
+    def replaceShapes(self, shapes):
+        mb = QtWidgets.QMessageBox
+        replay = mb.question(
+            self,
+            "Annotations",
+            "This process can override current annotations. Do you want to replace current annotations?",
+            mb.Yes | mb.No | mb.Cancel,
+            mb.Yes,
+        )
+
+        if replay == mb.Yes:
+            self.loadShapes(shapes)
+        if replay == mb.No:
+            self.loadShapes(shapes, replace=False)
+        if replay == mb.Cancel:
+            return
 
     ## add labels to label and uniqLabel list.
     def addLabel(self, shape):
@@ -1804,7 +1862,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().show()
 
         current_file = self.filename
-        self.importDirImages(self.lastOpenDir, load=False)
+        if current_file:
+            if self.fileListWidget.count()>0:
+                self.importDirImages(self.lastOpenDir, load=False)
+            else:
+                self.loadFile(current_file)
 
         if current_file in self.imageList:
             # retain currently selected file
@@ -2249,3 +2311,33 @@ class MainWindow(QtWidgets.QMainWindow):
         brightness = dialog.slider_brightness.value()
         contrast = dialog.slider_contrast.value()
         self.brightnessContrast_values[self.filename] = (brightness, contrast)
+
+    ##################################  My new methods   ################################
+
+    def changeLabelFileType(self):
+        dialog = LabelFileTypeDialog(self.labelFileType)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            self.labelFileType = dialog.getCurrentOption
+            if self.filename:   ## Load annotations if image/s is open.
+                if self.fileListWidget.count()>0:
+                    self.importDirImages(self.lastOpenDir)
+                else:
+                    self.loadFile(self.filename)
+    
+    def openAnnotationFile(self):
+        dirpath = osp.dirname(self.filename) if self.filename else "."
+        if self.output_dir:
+            dirpath = self.output_dir
+
+        filters = self.tr("Label files (%s)") % " ".join(
+            ["*%s" % self.getlblFileExt]
+        )
+        selectedFilePath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("%s - Choose Label file") % __appname__,
+            dirpath,
+            filters,
+        )
+        if selectedFilePath:
+            self.lblFileLoaders.get(self.labelFileType)(None,selectedFilePath,True)
+

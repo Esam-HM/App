@@ -21,3 +21,5 @@ from .unique_label_qlist_widget import UniqueLabelQListWidget
 from .zoom_widget import ZoomWidget
 
 from .directory_selector import DirectorySelector
+
+from .label_file_type_dialog import LabelFileTypeDialog

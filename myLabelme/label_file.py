@@ -191,3 +191,63 @@ class LabelFile(object):
     @staticmethod
     def is_label_file(filename):
         return osp.splitext(filename)[1].lower() == LabelFile.suffix
+    
+    def loadYoloTxtFile(self, filename):
+        data = self.loadTxtFileData(filename)
+        self.shapes = self.txtDataToJsonData(data)
+        self.filename = filename
+        self.flags = None
+        
+    def getImageShapes(self):
+        imgArr = utils.img_data_to_arr(self.imageData)
+        return imgArr.shape[:2]
+
+    def loadTxtFileData(self, filename):
+        with open(filename, "r") as f:
+            lines = f.readlines()
+        height, width = self.getImageShapes()
+        pp = {}
+        
+        for line in lines:
+            data = line.strip().split()
+            if data and len(data)==5:
+                try:
+                    classID = int(data[0])
+                    x_center = float(data[1])*width
+                    y_center = float(data[2])*height
+                    box_width = float(data[3])*width
+                    box_height = float(data[4])*height
+                except ValueError:
+                    return
+                 
+                x1 = int(x_center-box_width/2)
+                y1 = int(y_center-box_height/2)
+                x2 = int(x_center+box_width/2)
+                y2 = int(y_center+box_height/2)
+                
+                if pp.get(classID) is None:
+                    pp[classID] = []
+                pp[classID].append([(x1,y1),(x2,y2)])
+        
+        return pp
+    
+    def txtDataToJsonData(self,data):
+        shapes = []
+        for key, values in data.items():
+            for value in values:
+                shape = {}
+                shape["group_id"] = None
+                shape["label"] = str(key)
+                shape["description"] = None
+                shape["shape_type"] = "rectangle"
+                shape["flags"] = {}
+                shape["mask"] = None
+                shape["points"] = []
+                shape["other_data"] = {}
+
+                for x,y in value:
+                    shape["points"].append([x,y])
+                
+                shapes.append(shape)
+        
+        return shapes
