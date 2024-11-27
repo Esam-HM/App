@@ -201,9 +201,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.scrollRequest.connect(self.scrollRequest)
         self.canvas.selectionChanged.connect(self.shapeSelectionChanged)
         self.canvas.newShape.connect(self.newShape)
-        ## XXX self.canvas.shapeMoved.connect(self.setDirty)
-        ## XXX self.canvas.drawingPolygon.connect(self.toggleDrawingSensitive)
-        ## XXX self.canvas.vertexSelected.connect(self.actions.removePoint.setEnabled)
+        self.canvas.shapeMoved.connect(self.setDirty)
+        self.canvas.drawingPolygon.connect(self.toggleDrawingSensitive)
+        
 
 
         ## Zoom Widget
@@ -322,16 +322,15 @@ class MainWindow(QtWidgets.QMainWindow):
             "Close current file",
             enabled=False,
         )
-        ## XXX
         toggle_keep_prev_mode = action(
             self.tr("Keep Previous Annotation"),
-            None,
+            self.toggleKeepPrevMode,
             shortcuts["toggle_keep_prev_mode"],
             None,
             self.tr('Toggle "keep pevious annotation" mode'),
             checkable=True,
         )
-        #toggle_keep_prev_mode.setChecked(self._config["keep_prev"])
+        toggle_keep_prev_mode.setChecked(self._config["keep_prev"])
 
         editMode = action(
             self.tr("Edit Polygons"),
@@ -531,19 +530,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Undo last drawn point"),
             enabled=False,
         )
-        ## XXX
         removePoint = action(
             text="Remove Selected Point",
-            slot=None,
+            slot=self.removeSelectedPoint,
             shortcut=shortcuts["remove_selected_point"],
             icon="edit",
             tip="Remove selected point from polygon",
             enabled=False,
         )
-        ## XXX
         undo = action(
             self.tr("Undo\n"),
-            None,
+            self.undoShapeEdit,
             shortcuts["undo"],
             "undo",
             self.tr("Undo last add and edit of shape"),
@@ -653,11 +650,11 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Select specific label file type to open it when load images"),
         )
         loadAnnotationFile = action(
-            self.tr("Load Annotation From File"),
+            self.tr("Load Annotations From File"),
             self.openAnnotationFile,
             None,
             "objects",
-            self.tr("Select label file to load annotation to current image"),
+            self.tr("Select label file to load annotations to current image"),
             enabled=False,
         )
 
@@ -712,8 +709,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 delete,
                 deleteAll,
                 None,
+                undo,
                 undoLastPoint,
                 None,
+                removePoint,
+                None,
+                toggle_keep_prev_mode,
             ),
             # menu shown at right click
             menu=(
@@ -732,7 +733,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 copy,
                 paste,
                 delete,
+                undo,
                 undoLastPoint,
+                removePoint,
             ),
             onLoadActive=(
                 close,
@@ -746,6 +749,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 createAiMaskMode,
                 editMode,
                 brightnessContrast,
+                loadAnnotationFile,
             ),
             onShapesPresent=(saveAs, deleteAll, hideAll, showAll, toggleAll),
             extractFrames=extractFrames,
@@ -755,7 +759,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
         ## Grouping toolBar's actions.
-        ## XXX
         self.actions.tool = (
             open_,
             opendir,
@@ -768,6 +771,7 @@ class MainWindow(QtWidgets.QMainWindow):
             editMode,
             delete,
             deleteAll,
+            undo,
             None,
             brightnessContrast,
             None,
@@ -808,7 +812,6 @@ class MainWindow(QtWidgets.QMainWindow):
         #######  Adding Actions  #######
         ## label menu popUp
         utils.addActions(labelMenu, (edit, delete))
-        ## XXX
         utils.addActions(self.menus.file,(
             open_,
             openNextImg,
@@ -853,15 +856,15 @@ class MainWindow(QtWidgets.QMainWindow):
         utils.addActions(self.tools,self.actions.tool)
         # Custom context menu for the canvas widget:
         utils.addActions(self.canvas.menus[0], self.actions.menu)
-        ## XXX
-        # utils.addActions(
-        #     self.canvas.menus[1],
-        #     (
-        #         action("&Copy here", self.copyShape),
-        #         action("&Move here", self.moveShape),
-        #     ),
-        # )
-        
+        utils.addActions(
+            self.canvas.menus[1],
+            (
+                action("&Copy here", self.copyShape),
+                action("&Move here", self.moveShape),
+            ),
+        )
+        self.canvas.vertexSelected.connect(self.actions.removePoint.setEnabled)
+
         # Since loading the file may take some time,
         # make sure it runs in the background.
         if self.filename is not None:
@@ -1442,6 +1445,7 @@ class MainWindow(QtWidgets.QMainWindow):
         shape.select_line_color = QtGui.QColor(255, 255, 255)
         shape.select_fill_color = QtGui.QColor(r, g, b, 155)
 
+    ## Copy multiple selected shapes.
     def copyShape(self):
         self.canvas.endMove(copy=True)
         for shape in self.canvas.selectedShapes:
@@ -1449,9 +1453,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList.clearSelection()
         self.setDirty()
 
+    ## Move multiple selected shapes.
     def moveShape(self):
         self.canvas.endMove(copy=False)
         self.setDirty()
+
+    ## Undo the edit made on canvas.
+    def undoShapeEdit(self):
+        self.canvas.restoreShape()
+        self.labelList.clear()
+        self.loadShapes(self.canvas.shapes)
+        self.actions.undo.setEnabled(self.canvas.isShapeRestorable)
 
     def deleteSelectedShape(self):
         yes, no = QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No
@@ -1494,6 +1506,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def copySelectedShape(self):
         self._copied_shapes = [s.copy() for s in self.canvas.selectedShapes]
         self.actions.paste.setEnabled(len(self._copied_shapes) > 0)
+
+    def removeSelectedPoint(self):
+        self.canvas.removeSelectedPoint()
+        self.canvas.update()
+        if not self.canvas.hShape.points:
+            self.canvas.deleteShape(self.canvas.hShape)
+            self.remLabels([self.canvas.hShape])
+            if self.noShapes():
+                for action in self.actions.onShapesPresent:
+                    action.setEnabled(False)
+        self.setDirty()
 
     ###############   Labels   ##################
     
@@ -1787,10 +1810,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ##############  utils  #############
 
-    ## XXX
     def setDirty(self):
         # Even if we autosave the file, we keep the ability to undo
-        # self.actions.undo.setEnabled(self.canvas.isShapeRestorable)
+        self.actions.undo.setEnabled(self.canvas.isShapeRestorable)
 
         if self._config["auto_save"] or self.actions.saveAuto.isChecked():
             label_file = osp.splitext(self.imagePath)[0] + ".json"
@@ -1877,6 +1899,10 @@ class MainWindow(QtWidgets.QMainWindow):
     ## Get current path.
     def currentPath(self):
         return osp.dirname(str(self.filename)) if self.filename else "."
+    
+    ## ??
+    def toggleKeepPrevMode(self):
+        self._config["keep_prev"] = not self._config["keep_prev"]
 
     ## Control for unsaved states. (dirty is true) 
     def mayContinue(self):
@@ -2084,7 +2110,6 @@ class MainWindow(QtWidgets.QMainWindow):
     ##############   Canvas   #############
 
     ## drawing new shape on canvas
-    ## XXX
     def newShape(self):
         """Pop-up and give focus to the label editor.
 
@@ -2118,8 +2143,8 @@ class MainWindow(QtWidgets.QMainWindow):
             shape.description = description
             self.addLabel(shape)
             self.actions.editMode.setEnabled(True)
-            ##self.actions.undoLastPoint.setEnabled(False)
-            ##self.actions.undo.setEnabled(True)
+            self.actions.undoLastPoint.setEnabled(False)
+            self.actions.undo.setEnabled(True)
             self.setDirty()
         else:
             self.canvas.undoLastLine()
