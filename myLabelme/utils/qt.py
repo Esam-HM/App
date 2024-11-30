@@ -21,7 +21,8 @@ def newButton(text, icon=None, slot=None, enable=True, tip=None):
     if slot is not None:
         b.clicked.connect(slot)
     b.setEnabled(enable)
-    b.setToolTip(tip)
+    if tip:
+        b.setToolTip(tip)
     return b
 
 
