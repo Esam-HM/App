@@ -1845,7 +1845,7 @@ class MainWindow(QtWidgets.QMainWindow):
             item = self.fileListWidget.item(i)
             lst.append(item.text())
         return lst
-    ## FIXME If current image not saved and remove current file. click cancel when answering to save annotations makes bug.
+    
     ## Toggle file list state to default.
     def resetFileListWidget(self, load=True):
         self.fileListEditMode=False
