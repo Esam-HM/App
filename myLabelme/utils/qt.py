@@ -14,12 +14,14 @@ def newIcon(icon):
     return QtGui.QIcon(osp.join(":/", icons_dir, "%s.png" % icon))
 
 
-def newButton(text, icon=None, slot=None):
+def newButton(text, icon=None, slot=None, enable=True, tip=None):
     b = QtWidgets.QPushButton(text)
     if icon is not None:
         b.setIcon(newIcon(icon))
     if slot is not None:
         b.clicked.connect(slot)
+    b.setEnabled(enable)
+    b.setToolTip(tip)
     return b
 
 

@@ -64,6 +64,7 @@ class MainWindow(QtWidgets.QMainWindow):
             Qt.Vertical: {},
         }  # key=filename, value=scroll_value
         self.labelFileType = 0
+        self.fileListEditMode=False
 
         self.lblFileLoaders = {
             0: lambda x,y,z=False: self.loadAppJsonFile(x,y,z),
@@ -157,13 +158,35 @@ class MainWindow(QtWidgets.QMainWindow):
                 rgb = self._get_rgb_by_label(label)
                 self.uniqLabelList.setItemLabel(item, label, rgb)
 
-        # File list
+        ## File list
+        self.fileListDeleteBtn = utils.newButton("","recycle_bin",
+                                             self.removeSelectedFiles,
+                                             False,"Remove selected items.")
+
+        self.fileListEditBtn = utils.newButton("","edit_icon",
+                                           self.editFileListWidget,
+                                           False,"Edit file list items.")
+
+        self.fileListCancelBtn = utils.newButton("","cancel",
+                                             lambda : self.resetFileListWidget(),
+                                             False,"Cancel edit.")
+
+        fileListBtnsLayout = QtWidgets.QHBoxLayout()
+        fileListBtnsLayout.addWidget(self.fileListDeleteBtn)
+        fileListBtnsLayout.addWidget(self.fileListEditBtn)
+        fileListBtnsLayout.addWidget(self.fileListCancelBtn)
+        fileListBtnsLayout.setContentsMargins(0,0,0,0)
+        fileListBtnsLayout.setSpacing(0)
+        fileListBtnsWidget = QtWidgets.QWidget()
+        fileListBtnsWidget.setLayout(fileListBtnsLayout)
+        
         self.fileSearch = QtWidgets.QLineEdit()
         self.fileSearch.setPlaceholderText(self.tr("Search Filename"))
         self.fileListWidget = QtWidgets.QListWidget()
         fileListLayout = QtWidgets.QVBoxLayout()
         fileListLayout.setContentsMargins(0, 0, 0, 0)
         fileListLayout.setSpacing(0)
+        fileListLayout.addWidget(fileListBtnsWidget)
         fileListLayout.addWidget(self.fileSearch)
         fileListLayout.addWidget(self.fileListWidget)
         self.file_dock = QtWidgets.QDockWidget(self.tr("File List"), self)
@@ -173,7 +196,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.file_dock.setWidget(fileListWidget)
         self.fileListWidget.itemSelectionChanged.connect(self.fileSelectionChanged)
         self.fileSearch.textChanged.connect(self.fileSearchChanged)
-        
+
         ## config
         if config["file_search"]:
            self.fileSearch.setText(config["file_search"])
@@ -461,7 +484,6 @@ class MainWindow(QtWidgets.QMainWindow):
         saveAuto = action(
             text=self.tr("Save &Automatically"),
             slot=lambda x: self.actions.saveAuto.setChecked(x),
-            icon="save",
             tip=self.tr("Save automatically"),
             checkable=True,
             enabled=True,
@@ -937,8 +959,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not filenames:   ## FIXED
             return
 
-        self.actions.openNextImg.setEnabled(True)
-        self.actions.openPrevImg.setEnabled(True)
+        #self.actions.openNextImg.setEnabled(True)
+        #self.actions.openPrevImg.setEnabled(True)
+        self.resetFileListWidget(load=False)
         ### For search in list.
         ### Filter files for pattern to select specific one.
         if pattern:
@@ -1032,12 +1055,19 @@ class MainWindow(QtWidgets.QMainWindow):
     ## Closing opened file.
     def closeFile(self, _value=False):
         if not self.mayContinue():
-            return
+            return False
         self.resetState()
         self.setClean()
         self.toggleActions(False)
         self.canvas.setEnabled(False)
         self.actions.saveAs.setEnabled(False)
+        self.actions.undo.setEnabled(False)
+        self.actions.undoLastPoint.setEnabled(False)
+        self.actions.delete.setEnabled(False)
+        for action in self.actions.onShapesPresent:
+            action.setEnabled(False)
+        
+        return True
     
     ## Delete currently opened image's label file.
     def deleteFile(self):
@@ -1135,6 +1165,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.resetState()
         self.canvas.setEnabled(False)
+        for action in self.actions.onShapesPresent:
+            action.setEnabled(False)
         if filename is None:
             filename = self.settings.value("filename", "")
         filename = str(filename)
@@ -1492,6 +1524,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.noShapes():
                 for action in self.actions.onShapesPresent:
                     action.setEnabled(False)
+            self.actions.delete.setEnabled(False)
 
     def duplicateSelectedShape(self):
         added_shapes = self.canvas.duplicateSelectedShapes()
@@ -1777,7 +1810,6 @@ class MainWindow(QtWidgets.QMainWindow):
         return None
 
     ################## File list Widget Functions  ################
-    ## TODO remove files from list.
 
     def fileSearchChanged(self):
         self.importDirImages(
@@ -1788,16 +1820,22 @@ class MainWindow(QtWidgets.QMainWindow):
     ## triggered when selecting new file item
     ## to load it.
     def fileSelectionChanged(self):
-        items = self.fileListWidget.selectedItems()
-        if not items or not self.mayContinue():
-            return
-        
-        item = items[0]
-        currIndex = self.imageList.index(str(item.text()))
-        if currIndex < len(self.imageList):
-            filename = self.imageList[currIndex]
-            if filename:
-                self.loadFile(filename)
+        ## Enable and Disable File list widget buttons.
+        isEnable = len(self.fileListWidget.selectedItems())>0
+        self.fileListDeleteBtn.setEnabled(isEnable)
+        self.fileListEditBtn.setEnabled(isEnable and not self.fileListEditMode)
+
+        if not self.fileListEditMode:   ## Do not load image when editing file list.
+            items = self.fileListWidget.selectedItems()
+            if not items or not self.mayContinue():
+                return
+            
+            item = items[0]
+            currIndex = self.imageList.index(str(item.text()))
+            if currIndex < len(self.imageList):
+                filename = self.imageList[currIndex]
+                if filename:
+                    self.loadFile(filename)
 
     ## Adding all files from fileList to image list.    
     @property
@@ -1807,6 +1845,71 @@ class MainWindow(QtWidgets.QMainWindow):
             item = self.fileListWidget.item(i)
             lst.append(item.text())
         return lst
+    ## FIXME If current image not saved and remove current file. click cancel when answering to save annotations makes bug.
+    ## Toggle file list state to default.
+    def resetFileListWidget(self, load=True):
+        self.fileListEditMode=False
+        self.fileListCancelBtn.setEnabled(False)
+        self.actions.openNextImg.setEnabled(True)
+        self.actions.openPrevImg.setEnabled(True)
+        self.fileListWidget.setSelectionMode(QtWidgets.QListWidget.SingleSelection)
+        if load:
+            if self.fileListWidget.count()<=0:
+                self.actions.openNextImg.setEnabled(False)
+                self.actions.openPrevImg.setEnabled(False)
+                return
+            ## If current file not removed >> just mark it as current row without reloading image.
+            items = self.fileListWidget.findItems(self.filename, Qt.MatchExactly)
+            if not items:
+                return
+            row = self.fileListWidget.row(items[0])
+            self.fileListWidget.itemSelectionChanged.disconnect(self.fileSelectionChanged)
+            self.fileListDeleteBtn.setEnabled(True)
+            self.fileListEditBtn.setEnabled(True)
+            self.fileListWidget.setCurrentRow(row)
+            self.fileListWidget.itemSelectionChanged.connect(self.fileSelectionChanged)
+  
+
+    ## Change file list mode to edit to select multiple items.
+    def editFileListWidget(self):
+        self.fileListEditMode=True      ## Disable signal when selecting multiple items.
+        self.fileListWidget.clearSelection()
+        self.fileListWidget.setSelectionMode(QtWidgets.QListWidget.MultiSelection)
+        self.fileListEditBtn.setEnabled(False)
+        self.fileListCancelBtn.setEnabled(True)
+        self.actions.openNextImg.setEnabled(False)
+        self.actions.openPrevImg.setEnabled(False)
+
+    ## Remove selected item/s.
+    def removeSelectedFiles(self):
+        items = self.fileListWidget.selectedItems()
+
+        mb = QtWidgets.QMessageBox
+        replay = mb.question(
+            self,
+            "Remove Files",
+            "%s files will be removed from list. Are you sure?" % len(items),
+            mb.Yes | mb.No | mb.Cancel,
+            mb.Yes,
+        )
+        if replay == mb.Cancel:     ## list to default.
+            self.resetFileListWidget()
+            return
+        if replay == mb.No: ## Do no thing.
+            return
+        else:       ## Delete items.
+            currItemRow = None
+            for item in items:
+                row = self.fileListWidget.row(item)
+                if self.filename == item.text():
+                    currItemRow = row
+                else:
+                    self.fileListWidget.takeItem(row)
+            
+            if currItemRow is not None and self.closeFile():
+                self.fileListWidget.takeItem(currItemRow)
+
+            self.resetFileListWidget()
 
     ##############  utils  #############
 
@@ -1851,7 +1954,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ## Save image data in label file.
     def enableSaveImageWithData(self, enabled):
-        print(type(enabled), enabled)
         self._config["store_data"] = enabled
         self.actions.saveWithImageData.setChecked(enabled)
 
@@ -1909,7 +2011,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.dirty:
             return True
         mb = QtWidgets.QMessageBox
-        msg = self.tr('Save annotations to "{}" before closing?').format(self.filename)
+        msg = self.tr('Save annotations to "{}" before closing?').format(self.getLabelFile())
         answer = mb.question(
             self,
             self.tr("Save annotations?"),
