@@ -3,6 +3,8 @@ import gdown     ## Used to efficiently download large models from github.
 from .efficient_sam import EfficientSam
 from .segment_anything_model import SegmentAnythingModel
 
+from .yolo_model import YoloModel
+
 ## This file initialize models classes.
 
 class SegmentAnythingModelVitB(SegmentAnythingModel):

@@ -5,7 +5,7 @@ import os
 import os.path as osp
 import re
 import webbrowser
-
+from qtpy.QtCore import QTimer
 import cv2
 import imgviz
 import natsort
@@ -13,7 +13,7 @@ from qtpy import QtCore, QtGui, QtWidgets
 from qtpy.QtCore import Qt
 
 from . import PY2, __appname__
-from .ai import MODELS
+from .ai import MODELS, YoloModel
 from .config import get_config
 from .label_file import LabelFile, LabelFileError
 from .logger import logger
@@ -241,6 +241,70 @@ class MainWindow(QtWidgets.QMainWindow):
         zoom.defaultWidget().setLayout(zoomBoxLayout)
         self.zoomWidget.setEnabled(False)
         self.zoomWidget.valueChanged.connect(self.paintCanvas)
+
+        ####   AI Widgets
+        selectAiModel = QtWidgets.QWidgetAction(self)
+        selectAiModel.setDefaultWidget(QtWidgets.QWidget())
+        selectAiModel.defaultWidget().setLayout(QtWidgets.QVBoxLayout())
+        
+        selectAiModelLabel = QtWidgets.QLabel(self.tr("AI Model"))
+        selectAiModelLabel.setAlignment(QtCore.Qt.AlignCenter)
+        selectAiModel.defaultWidget().layout().addWidget(selectAiModelLabel)
+        
+        self._selectAiModelComboBox = QtWidgets.QComboBox()
+        selectAiModel.defaultWidget().layout().addWidget(self._selectAiModelComboBox)
+        model_names = [model.name for model in MODELS]
+        self._selectAiModelComboBox.addItems(model_names)
+        if self._config["ai"]["default"] in model_names:
+            model_index = model_names.index(self._config["ai"]["default"])
+        else:
+            logger.warning(
+                "Default AI model is not found: %r",
+                self._config["ai"]["default"],
+            )
+            model_index = 0
+        self._selectAiModelComboBox.setCurrentIndex(model_index)
+        self._selectAiModelComboBox.currentIndexChanged.connect(
+            lambda: self.canvas.initializeAiModel(
+                name=self._selectAiModelComboBox.currentText()
+            )
+            if self.canvas.createMode in ["ai_polygon", "ai_mask"]
+            else None
+        )
+
+        self.model_path = None
+        self.yoloModel = YoloModel()
+
+        yoloMainWidget = QtWidgets.QWidget()
+        yoloMainWidgetLayout = QtWidgets.QVBoxLayout()
+        yoloMainWidgetLayout.setContentsMargins(0,10,0,10)
+        yoloMainWidgetLayout.setSpacing(0)
+        #
+        #_warningLabel = QtWidgets.QLabel(self.tr("Warning: These methods will overwrite the existing labels!"))
+        #_warningLabel.setStyleSheet("color:red;")
+        #_warningLabel.setAlignment(QtCore.Qt.AlignCenter)
+        #runYolo.defaultWidget().layout().addWidget(_warningLabel)
+ 
+        self.yoloModelLabel = QtWidgets.QLabel("No Model")
+        self.yoloModelLabel.setAlignment(QtCore.Qt.AlignCenter)
+
+        self._runYoloButton = utils.newButton(self.tr("Image Detection"),
+                                         slot=self.runYolo,
+                                         enable=False)
+        self._runYoloVidButton = utils.newButton(self.tr("Video Detection"),
+                                         slot=self.runYoloVid,
+                                         enable=False)
+        self._runYoloTrackButton = utils.newButton(self.tr("Track Detection"),
+                                         slot=self.runYoloTrack,
+                                         enable=False)
+
+        yoloMainWidgetLayout.addWidget(self.yoloModelLabel)
+        yoloMainWidgetLayout.addWidget(self._runYoloButton)
+        yoloMainWidgetLayout.addWidget(self._runYoloVidButton)
+        yoloMainWidgetLayout.addWidget(self._runYoloTrackButton)
+        yoloMainWidget.setLayout(yoloMainWidgetLayout)
+        yoloMainAction = QtWidgets.QWidgetAction(self)
+        yoloMainAction.setDefaultWidget(yoloMainWidget)
 
         ## Tool Bar
         self.tools = self.toolbar("Tools")
@@ -600,7 +664,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Increase zoom level"),
             enabled= False,
         )
-
         zoomOut = action(
             self.tr("&Zoom Out"),
             functools.partial(self.addZoom, 0.9),
@@ -678,6 +741,12 @@ class MainWindow(QtWidgets.QMainWindow):
             "objects",
             self.tr("Select label file to load annotations to current image"),
             enabled=False,
+        )
+        selectAiModelFile = action(
+            self.tr("&Select Object Detection Model"),
+            self.selectObjModel,
+            icon="ai",
+            tip=self.tr("Select a model for object detection"),
         )
 
         # Store actions for further handling.
@@ -777,6 +846,7 @@ class MainWindow(QtWidgets.QMainWindow):
             extractFrames=extractFrames,
             changeLblFileType=changeLblFileType,
             loadAnnotationFile=loadAnnotationFile,
+            selectAiModelFile=selectAiModelFile,
         )
 
 
@@ -800,6 +870,7 @@ class MainWindow(QtWidgets.QMainWindow):
             fitWindow,
             zoom,
             None,
+            yoloMainAction,
         )
         # Group zoom controls into a list for easier toggling.
         self.actions.zoomActions = (
@@ -874,6 +945,8 @@ class MainWindow(QtWidgets.QMainWindow):
             None,
             brightnessContrast,
         ))
+        
+        utils.addActions(self.menus.ai, [selectAiModelFile, selectAiModel])
         utils.addActions(self.menus.help, [help])
         utils.addActions(self.tools,self.actions.tool)
         # Custom context menu for the canvas widget:
@@ -1066,7 +1139,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions.delete.setEnabled(False)
         for action in self.actions.onShapesPresent:
             action.setEnabled(False)
-        
+        self.toggleRunYoloBtns()
         return True
     
     ## Delete currently opened image's label file.
@@ -1260,6 +1333,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.paintCanvas()
         self.addRecentFile(self.filename)
         self.toggleActions(True)
+        self.toggleRunYoloBtns()
         self.canvas.setFocus()
         self.status(str(self.tr("Loaded %s")) % osp.basename(str(filename)))
         return True
@@ -2468,3 +2542,224 @@ class MainWindow(QtWidgets.QMainWindow):
         if selectedFilePath:
             self.lblFileLoaders.get(self.labelFileType)(None,selectedFilePath,True)
 
+    ##########  AI Actions ###########
+    
+    ## Object detection on single image
+    def runYolo(self, track=False):
+        self._runYoloButton.setEnabled(False)
+        self.status("Making predictions....")
+
+        if not self.imagePath:
+            self.errorMessage("Error",
+                              "<p>Image not found. <br/> Please load image to make detection.</p>")
+
+            return
+
+        if not self.yoloModel.loadModel():
+            print("Failure")
+            return
+
+        results = self.yoloModel.getResults(self.imagePath)
+        if results is None:
+            self.status("No Object detected on current image")
+            return
+
+        for result in results:
+            if len(result.boxes.xyxy) > 0:
+                point_list = result.boxes.xyxy.tolist()
+
+                pred_shapes = []
+                i = 0
+                for shapepoints in point_list:
+                    qpoint_list = [QtCore.QPointF(shapepoints[0], shapepoints[1]), QtCore.QPointF(shapepoints[2], shapepoints[3])]
+                    id = None
+                    if track:
+                        id = int(result.boxes.id[i].item())
+
+                    pred_shapes.append(Shape(
+                    label=result.names[int(result.boxes.cls[i])],
+                    group_id=id,
+                    flags={},
+                    line_color=None,
+                    shape_type="rectangle",
+                    description=None,
+                    ))
+
+                    pred_shapes[-1].addPoint(qpoint_list[0])
+                    pred_shapes[-1].addPoint(qpoint_list[1])
+                    i += 1
+
+                self.loadShapes(pred_shapes,replace=True)
+        
+        self._runYoloButton.setEnabled(True)
+
+    def runYoloWithModel(self, track=False):
+        if not self.imagePath:
+            return
+        self.yoloModel.track = track
+        results = self.yoloModel.getResults(self.imagePath)
+        if results is None:
+            return
+        for result in results:
+            if len(result.boxes.xyxy) > 0:
+                point_list = result.boxes.xyxy.tolist()
+
+                pred_shapes = []
+                i = 0
+                for shapepoints in point_list:
+                    qpoint_list = [QtCore.QPointF(shapepoints[0], shapepoints[1]), QtCore.QPointF(shapepoints[2], shapepoints[3])]
+                    id = None
+                    if track:
+                        id = int(result.boxes.id[i].item())
+
+                    pred_shapes.append(Shape(
+                    label=result.names[int(result.boxes.cls[i])],
+                    group_id=id,
+                    flags={},
+                    line_color=None,
+                    shape_type="rectangle",
+                    description=None,
+                    ))
+
+                    pred_shapes[-1].addPoint(qpoint_list[0])
+                    pred_shapes[-1].addPoint(qpoint_list[1])
+                    i += 1
+
+                self.loadShapes(pred_shapes,replace=True)
+
+    def runYoloVid(self, track = False):
+        # the real code is above
+        # if not (self.model_path and self.model_path.split(".")[-1] == "pt"):
+        #     self.errorDialogue.setText(self.tr("Model cannot found!"))
+        #     self.errorDialogue.show()
+        #     return
+
+        # if(self.fileListWidget.count() <= 0):
+        #     self.errorDialogue.setText(self.tr("No frame found!"))
+        #     self.errorDialogue.show()
+        #     return
+        if self.fileListWidget.count()<=0:
+            self.errorMessage("Error","<p>Files list is empty.</p>")
+            return
+        
+        if not self.yoloModel.loadModel():
+            return
+        
+        progress = QtWidgets.QProgressDialog("Running Model on Video", "Cancel", 0, self.fileListWidget.count(), self)
+        progress.setWindowModality(Qt.WindowModal)
+
+        #model = YoloModel(self.model_path,track=track)
+
+        for i in range(self.fileListWidget.count()):
+            progress.setValue(i)
+
+            if progress.wasCanceled():
+                break
+
+            self.loadFile(self.fileListWidget.item(i).text())
+            self.runYoloWithModel(track=track)
+            self.saveFileAuto()
+            #time.sleep(2)
+
+        progress.setValue(self.fileListWidget.count())
+
+    def runYoloTrack(self):
+        self.runYoloVid(track=True)
+
+    def runYoloJson(self,path):
+
+        def format_shape(s):
+            data = s.other_data.copy()
+            data.update(
+                dict(
+                    label=s.label.encode("utf-8") if PY2 else s.label,
+                    points=[(p.x(), p.y()) for p in s.points],
+                    group_id=s.group_id,
+                    description=s.description,
+                    shape_type=s.shape_type,
+                    flags=s.flags,
+                    mask=None if s.mask is None else utils.img_arr_to_b64(s.mask),
+                )
+            )
+            return data
+
+        model = YoloModel(self.model_path)
+
+        results = model.getResults(path)
+        if results is None:
+            return
+        for result in results:
+            if len(result.boxes.xyxy) > 0:
+                point_list = result.boxes.xyxy.tolist()
+
+                pred_shapes = []
+                i = 0
+                for shapepoints in point_list:
+                    qpoint_list = [QtCore.QPointF(shapepoints[0], shapepoints[1]), QtCore.QPointF(shapepoints[2], shapepoints[3])]
+
+                    pred_shapes.append(Shape(
+                    label=result.names[int(result.boxes.cls[i])],
+                    group_id=None,
+                    flags={},
+                    line_color=None,
+                    shape_type="rectangle",
+                    description=None,
+                    ))
+
+                    pred_shapes[-1].addPoint(qpoint_list[0])
+                    pred_shapes[-1].addPoint(qpoint_list[1])
+                    i += 1
+
+                lf = LabelFile()
+
+                imagefile = QtGui.QImage(path)
+                jsonfile = os.path.splitext(path)[0] + ".json"
+
+                lf.change_and_save(
+                    filename=jsonfile,
+                    shapes=[format_shape(shape) for shape in pred_shapes],
+                    imagePath=path,
+                    imageHeight=imagefile.height(),
+                    imageWidth=imagefile.width(),
+                )
+
+        return
+
+    def saveFileAuto(self, _value=False):
+        assert not self.image.isNull(), "cannot save empty image"
+        if self.labelFile:
+            self._saveFile(self.labelFile.filename)
+        elif self.output_file:
+            self._saveFile(self.output_file)
+            self.close()
+        else:
+            self._saveFile(self.filename.split(".")[0] + ".json")
+
+    def selectObjModel(self):
+        model_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("%s - Choose AI Model File") % __appname__,
+            ".",
+            self.tr("Model Files (*.pt)"),
+        )
+        if not model_path:
+            return
+        if not YoloModel.isFileValid(model_path):
+            self.errorMessage("Error",
+                              ("<p>Make sure <i>{0}</i> is a valid model file.<br/>"
+                              "Supported model formats: (*.pt)</p>").format(model_path))
+            return
+        
+        self.yoloModel.resetState()
+        self.yoloModel.setModelPath(model_path)
+        self.yoloModelLabel.setText(self.yoloModel.getUniqueName())
+        self.toggleRunYoloBtns()
+
+    def toggleRunYoloBtns(self):
+        flag1 = True if self.fileListWidget.count()>0 else False
+        flag2 = True if self.filename else False
+        flag3 = True if self.yoloModel.modelPath else False
+
+        self._runYoloButton.setEnabled(flag2 and flag3)
+        self._runYoloVidButton.setEnabled(flag1 and flag2 and flag3)
+        self._runYoloTrackButton.setEnabled(flag1 and flag2 and flag3)
