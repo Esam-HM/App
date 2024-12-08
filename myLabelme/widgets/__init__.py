@@ -22,4 +22,4 @@ from .zoom_widget import ZoomWidget
 
 from .directory_selector import DirectorySelector
 
-from .label_file_type_dialog import LabelFileTypeDialog
+from .open_label_files_dialog import OpenLabelFilesDialog

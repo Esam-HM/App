@@ -22,7 +22,7 @@ from .widgets import (BrightnessContrastDialog, Canvas, FileDialogPreview,
                              LabelDialog, LabelListWidget, LabelListWidgetItem, ToolBar,
                              UniqueLabelQListWidget,
                              ZoomWidget, DirectorySelector, 
-                             LabelFileTypeDialog,)
+                             OpenLabelFilesDialog,)
 from . import utils
 
 LABEL_COLORMAP = imgviz.label_colormap()
@@ -64,6 +64,8 @@ class MainWindow(QtWidgets.QMainWindow):
             Qt.Vertical: {},
         }  # key=filename, value=scroll_value
         self.labelFileType = 0
+        self.legendFilePath = None
+        self.labelFilesDir = None
         self.fileListEditMode=False
 
         self.lblFileLoaders = {
@@ -730,7 +732,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Extract frames of a video to a directory"),
         )
         changeLblFileType = action(
-            self.tr("Change Label file Type"),
+            self.tr("Load Label Files"),
             self.changeLabelFileType,
             tip=self.tr("Select specific label file type to open it when load images"),
         )
@@ -1252,11 +1254,16 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # assumes same name, but json extension
         self.status(str(self.tr("Loading %s...")) % osp.basename(str(filename)))
-        
+
         label_file = osp.splitext(filename)[0] + self.getlblFileExt
-        if self.output_dir:
-            label_file_without_path = osp.basename(label_file)
-            label_file = osp.join(self.output_dir, label_file_without_path)
+
+
+        # if self.output_dir:
+        #     label_file_without_path = osp.basename(label_file)
+        #     label_file = osp.join(self.output_dir, label_file_without_path)
+
+        if self.labelFilesDir:
+            label_file = osp.join(self.labelFilesDir,osp.basename(label_file))
 
         self.lblFileLoaders.get(self.labelFileType)(filename,label_file)
 
@@ -1375,6 +1382,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if not self.imageData:
                 return
             self.imagePath = filename
+
         if osp.exists(label_file) and osp.splitext(label_file)[1]==".txt":
             self.labelFile = LabelFile()
             self.labelFile.imageData = self.imageData
@@ -2516,13 +2524,17 @@ class MainWindow(QtWidgets.QMainWindow):
     ##################################  My new methods   ################################
 
     def changeLabelFileType(self):
-        dialog = LabelFileTypeDialog(self.labelFileType)
+        dirPath = osp.dirname(self.imagePath) if self.imagePath else None
+        dialog = OpenLabelFilesDialog(self.labelFileType, dirPath)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             self.labelFileType = dialog.getCurrentOption
+            self.labelFilesDir = dialog.getSelectedDir
+            self.legendFilePath = dialog.getSelectedLegend
             if self.filename:   ## Load annotations if image/s is open.
                 if self.fileListWidget.count()>0:
                     self.importDirImages(self.lastOpenDir)
                 else:
+                    print("Here")
                     self.loadFile(self.filename)
     
     def openAnnotationFile(self):
