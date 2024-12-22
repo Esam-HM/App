@@ -66,12 +66,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelFileType = 0
         self.legendFilePath = None
         self.labelFilesDir = None
+        self.videoLblFile = None
         self.fileListEditMode=False
 
         self.lblFileLoaders = {
             0: lambda x,y,z=False: self.loadAppJsonFile(x,y,z),
             1: lambda x,y,z=False: self.loadTxtFile(x,y,z),
-            2: lambda x,y,_: QtWidgets.QMessageBox.information(self,"Info","Not Available Now"),
+            2: lambda x,y,z=False: self.loadVideoFile(x,y,z),
         }
 
         if output_file is not None and self._config["auto_save"]:
@@ -1034,8 +1035,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if not filenames:   ## FIXED
             return
 
-        #self.actions.openNextImg.setEnabled(True)
-        #self.actions.openPrevImg.setEnabled(True)
         self.resetFileListWidget(load=False)
         ### For search in list.
         ### Filter files for pattern to select specific one.
@@ -1111,12 +1110,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.mayContinue():
             return
         path = osp.dirname(str(self.filename)) if self.filename else "."
+        ## only open labelme (*.json) files.
+        ext = "*.json" if self.labelFileType==0 else ""
+
         formats = [
             "*.{}".format(fmt.data().decode())
             for fmt in QtGui.QImageReader.supportedImageFormats()
         ]
         filters = self.tr("Image & Label files (%s)") % " ".join(
-            formats + ["*%s" % self.getlblFileExt]
+            formats + ["%s" % ext]
         )
         selectedFilePath, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -1242,6 +1244,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.setEnabled(False)
         for action in self.actions.onShapesPresent:
             action.setEnabled(False)
+            
         if filename is None:
             filename = self.settings.value("filename", "")
         filename = str(filename)
@@ -1392,6 +1395,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.loadLabels(self.labelFile.shapes,loadAnnOnly)
         else:
             self.labelFile = None
+
+    def loadVideoFile(self, filename, label_file, loadAnnOnly= False):
+        ## check for list
+        self.imageData = LabelFile.load_image_file(filename)
+        if not self.imageData:
+            return
+        
+        self.imagePath = filename
+
+        def getCurrentFrameID():
+            file = self.fileListWidget.currentIndex()
+            print(file)
+
+        if osp.exists(label_file) and osp.splitext(label_file)[1]==".json":
+            self.labelFile = LabelFile()
+            self.labelFile.imageData = self.imageData
+            self.labelFile.imagePath = self.imagePath
+            getCurrentFrameID()
+            #self.labelFile.loadVideoLabelFile(label_file)
+
+        print("Here")
            
     
     @property
@@ -1487,7 +1511,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 frame_filename = os.path.join(dirpath, f"frame_{frame_count}.jpg")
                 image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 imgviz.io.imsave(frame_filename,image)  ##FIXED
-                #cv2.imwrite(frame_filename, frame) not working well.
+                #cv2.imwrite(frame_filename, frame) # not working well.
                 frame_count += 1
                 progress.setValue(frame_count)
 
@@ -1496,7 +1520,7 @@ class MainWindow(QtWidgets.QMainWindow):
         progress.setValue(int(total_frames/frame_interval))
         self.status("Frames saved succesfully to %s" % dirpath)
         
-        self.importDirImages(dirpath)
+        #self.importDirImages(dirpath)
     
     ## Used to update recent files menu.
     def updateFileMenu(self):
@@ -2068,11 +2092,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().show()
 
         current_file = self.filename
-        if current_file:
-            if self.fileListWidget.count()>0:
-                self.importDirImages(self.lastOpenDir, load=False)
-            else:
-                self.loadFile(current_file)
+        self.importDirImages(self.lastOpenDir, load=False)
 
         if current_file in self.imageList:
             # retain currently selected file
@@ -2523,24 +2543,33 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ##################################  My new methods   ################################
 
+    ## to open specific types of label files.
     def changeLabelFileType(self):
         dirPath = osp.dirname(self.imagePath) if self.imagePath else None
         dialog = OpenLabelFilesDialog(self.labelFileType, dirPath)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             self.labelFileType = dialog.getCurrentOption
-            self.labelFilesDir = dialog.getSelectedDir
             self.legendFilePath = dialog.getSelectedLegend
+            if self.labelFileType==2:
+                self.videoLblFile = dialog.getSelectedPath
+                self.labelFilesDir=None
+            else:
+                self.labelFilesDir = dialog.getSelectedPath
+                self.videoLblFile = None
+
             if self.filename:   ## Load annotations if image/s is open.
                 if self.fileListWidget.count()>0:
                     self.importDirImages(self.lastOpenDir)
                 else:
-                    print("Here")
                     self.loadFile(self.filename)
     
     def openAnnotationFile(self):
         dirpath = osp.dirname(self.filename) if self.filename else "."
         if self.output_dir:
             dirpath = self.output_dir
+        else:
+            if self.labelFilesDir:
+                dirpath = self.labelFilesDir
 
         filters = self.tr("Label files (%s)") % " ".join(
             ["*%s" % self.getlblFileExt]

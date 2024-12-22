@@ -252,6 +252,10 @@ class LabelFile(object):
         
         return shapes
     
+    def loadVideoLabelFile(self,frameNo=-1):
+        
+        pass
+    
     def change_and_save(
         self,
         filename,
