@@ -20,6 +20,8 @@ from .unique_label_qlist_widget import UniqueLabelQListWidget
 
 from .zoom_widget import ZoomWidget
 
-from .directory_selector import DirectorySelector
+#from .directory_selector import DirectorySelector
 
 from .open_label_files_dialog import OpenLabelFilesDialog
+
+from .extract_frames_dialog import ExtractFramesDialog

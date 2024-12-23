@@ -21,7 +21,7 @@ from .shape import Shape
 from .widgets import (BrightnessContrastDialog, Canvas, FileDialogPreview,
                              LabelDialog, LabelListWidget, LabelListWidgetItem, ToolBar,
                              UniqueLabelQListWidget,
-                             ZoomWidget, DirectorySelector, 
+                             ZoomWidget, ExtractFramesDialog, 
                              OpenLabelFilesDialog,)
 from . import utils
 
@@ -728,7 +728,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         extractFrames = action(
             self.tr("Extract Frames"),
-            self.extractFramesDialog,
+            self.openExtractFramesDialog,
             "open",
             self.tr("Extract frames of a video to a directory"),
         )
@@ -1439,53 +1439,41 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recentFiles.insert(0, filename)
 
     ## Open Video File
-    def extractFramesDialog(self):
+    def openExtractFramesDialog(self):
         defaultDirPath = osp.dirname(str(self.filename)) if self.filename else "."
         formats = [
-            "*.mp4",
-            "*.mkv",
-            "*.avi",
+            ".mp4",
+            ".mkv",
+            ".avi",
         ]
-        filters = self.tr("Video files (%s)") % " ".join(
+        filters = self.tr("Video files (*%s)") % " ".join(
             formats
         )
         selectedFilePath,_ = QtWidgets.QFileDialog.getOpenFileName(
             self,
-            self.tr("%s - Choose Video Files") % __appname__,
+            self.tr("%s - Choose Video File") % __appname__,
             defaultDirPath,
             filters,
         )
         if selectedFilePath:
-            videoDialog = QtWidgets.QDialog(self)
-            videoDialog.setModal(True)
-            layout = QtWidgets.QVBoxLayout(videoDialog)
-            dirpathlabel = QtWidgets.QLabel("Select output directory: ")
-            dirsel = DirectorySelector()
-            dirsel.setPath(str(osp.splitext(selectedFilePath)[0]))
-            frratelayout = QtWidgets.QHBoxLayout()
-            frameratelabel = QtWidgets.QLabel(self.tr("Select FPS : "))
-            frameratepicker = QtWidgets.QSpinBox()
-            frameratepicker.setRange(1,100)
-            frameratepicker.setSingleStep(1)
-            frameratepicker.setValue(5)
-            frratelayout.addWidget(frameratelabel)
-            frratelayout.addWidget(frameratepicker)
-            layout.addWidget(dirpathlabel)
-            layout.addWidget(dirsel)
-            layout.addLayout(frratelayout)
-            extbutton = QtWidgets.QPushButton("Extract")
-            extbutton.clicked.connect(videoDialog.accept)
-            layout.addWidget(extbutton, alignment = Qt.AlignCenter)
-            if videoDialog.exec() == QtWidgets.QDialog.Accepted:
-                self.extractVideo(selectedFilePath,dirsel.getPath(),frameratepicker.value())
+            if osp.splitext(selectedFilePath)[1].lower() in formats:
+                videoDialog = ExtractFramesDialog(osp.splitext(selectedFilePath)[0])
+                if videoDialog.exec() == QtWidgets.QDialog.Accepted:
+                    self.extractFrames(selectedFilePath, videoDialog.getOutputPath(), videoDialog.getSelectedFPS())
+            else:
+                self.errorMessage(
+                    "Invalid Video File", 
+                    "<p>Make sure the selected file extension is supported.<br> Supported Formats: {}</p>".format(", ".join("*" + format for format in formats))
+                )
 
-    def extractVideo(self, videopath, dirpath, framerate):
+
+    def extractFrames(self, videopath, dirpath, framerate):
         if not os.path.exists(dirpath):
             os.makedirs(dirpath)
 
         cap = cv2.VideoCapture(videopath)
         if not cap.isOpened():
-            self.errorMessage("Error","Error: Could not open video file.")
+            self.errorMessage("Error Opening Video","Error: Could not open video file.")
             return
 
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -2546,13 +2534,14 @@ class MainWindow(QtWidgets.QMainWindow):
     ## to open specific types of label files.
     def changeLabelFileType(self):
         dirPath = osp.dirname(self.imagePath) if self.imagePath else None
-        dialog = OpenLabelFilesDialog(self.labelFileType, dirPath)
+        dirPath = dirPath if dirPath else self.labelFilesDir
+        dialog = OpenLabelFilesDialog(self.labelFileType, dirPath, self.videoLblFile)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             self.labelFileType = dialog.getCurrentOption
             self.legendFilePath = dialog.getSelectedLegend
             if self.labelFileType==2:
                 self.videoLblFile = dialog.getSelectedPath
-                self.labelFilesDir=None
+                self.labelFilesDir = None
             else:
                 self.labelFilesDir = dialog.getSelectedPath
                 self.videoLblFile = None

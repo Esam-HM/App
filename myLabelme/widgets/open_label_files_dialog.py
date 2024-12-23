@@ -5,17 +5,17 @@ from os import path as osp
 
 
 class OpenLabelFilesDialog(QtWidgets.QDialog):
-    def __init__(self,selectedOption:int=0, dirPath:str=None):
+    def __init__(self,selectedOption:int=0, dirPath:str=None, videoLblPath:str=None):
         super().__init__()
         self.selectedOption = selectedOption
         self.selectedPath = dirPath
         self.selectedLegendFile = None
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-        self.setMinimumSize(400,361)
-        self.initUI()
+        self.setMinimumSize(400,200)
+        self.initUI(videoLblPath)
         self.adjustSize()
 
-    def initUI(self):
+    def initUI(self, videoLblPath):
         options = ["Default app format (.json)", "YOlO format (.txt)", "Label studio video format (.json)"]
         
         infoLbl = QtWidgets.QLabel(self)
@@ -69,6 +69,8 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         hLayout3 = QtWidgets.QHBoxLayout()
         self.videoPathEditTxt = QtWidgets.QLineEdit()
         self.videoPathEditTxt.setPlaceholderText("*Your Label File Path")
+        if videoLblPath:
+            self.videoPathEditTxt.setText(videoLblPath)
         browseVideoBtn = QtWidgets.QPushButton("Browse")
         self.videoPathErrorLbl = QtWidgets.QLabel()
         self.videoPathErrorLbl.setStyleSheet("color: #f00;")
@@ -107,9 +109,9 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
 
         ## Buttons
         layout5 = QtWidgets.QHBoxLayout()
-        applyBtn = QtWidgets.QPushButton("Apply")
+        self.applyBtn = QtWidgets.QPushButton("Apply")
         cancelBtn = QtWidgets.QPushButton("Cancel")
-        layout5.addWidget(applyBtn)
+        layout5.addWidget(self.applyBtn)
         layout5.addWidget(cancelBtn)
 
         mainLayout = QtWidgets.QVBoxLayout()
@@ -121,16 +123,20 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         mainLayout.addLayout(layout5)
         self.setLayout(mainLayout)
 
-        applyBtn.clicked.connect(self.applyChanges)
+        self.applyBtn.clicked.connect(self.applyChanges)
         cancelBtn.clicked.connect(lambda: self.reject())
         browseDirBtn.clicked.connect(self.selectLabelFilesDir)
         browseVideoBtn.clicked.connect(self.selectVideoLblFile)
         browseLegendBtn.clicked.connect(self.selectLegendFile)
-        self.legendPathEditTxt.editingFinished.connect(self.checkLegendFileExt)
-        self.videoPathEditTxt.editingFinished.connect(self.checkVideoFileExt)
+        self.videoPathEditTxt.textChanged.connect(self.isVideoPathEmpty)
+        self.dirpathEditTxt.textChanged.connect(self.isDirPathEmpty)
         self.comboBox.currentIndexChanged.connect(self.typeSelectionChanged)
         self.comboBox.currentIndexChanged.emit(self.comboBox.currentIndex())
 
+        if self.widget2.isVisible():
+            self.isDirPathEmpty()
+        else:
+            self.isVideoPathEmpty()
 
     @property
     def getCurrentOption(self):
@@ -143,50 +149,43 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
     @property
     def getSelectedLegend(self):
         return self.selectedLegendFile if self.selectedLegendFile!="" else None
-    
-    def typeSelectionChanged(self):
-        flag = self.comboBox.currentIndex()==2
-        self.widget3.setVisible(flag)
-        self.widget2.setVisible(not flag)
-
-        self.widget4.setVisible(self.comboBox.currentIndex()==1)
-
 
     def applyChanges(self):
-        isWid2Visible = self.widget2.isVisible()
-
+        path = ""
         ## check for visible widget.
-        if isWid2Visible:
-            ## Empty field
-            if self.dirpathEditTxt.text()=="":
-                self.showError(self.dirpathEditTxt, self.dirPathErrorLbl, "*** Directory must be chosen.")
-                return
-            ## Path exists.
-            if not osp.exists(self.dirpathEditTxt.text()):
+        if self.widget2.isVisible():
+            path = self.dirpathEditTxt.text()
+            ## check existance.
+            if not osp.exists(path):
                 self.showError(self.dirpathEditTxt, self.dirPathErrorLbl, "*** Invalid Path")
                 return
         else:
-            ## Empty field
-            if self.videoPathEditTxt.text()=="":
-                self.showError(self.videoPathEditTxt, self.videoPathErrorLbl, "*** Label file must be chosen.")
-                return
-            ## path exists
-            if not osp.exists(self.videoPathEditTxt.text()):
+            path = self.videoPathEditTxt.text()
+            ## check existance.
+            if not osp.exists(path):
                 self.showError(self.videoPathEditTxt, self.videoPathErrorLbl, "*** Invalid Path")
                 return
-
-        if self.legendPathEditTxt.text() and not osp.exists(self.legendPathEditTxt.text()):
-            self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Invalid Path")
-            return
-        
+            ## check extension.
+            if osp.splitext(path)[1].lower()!=".json":
+                self.showError(self.videoPathEditTxt, self.videoPathErrorLbl, "*** Only (.json) file accepted")  
+                return
+            
+        legend = self.legendPathEditTxt.text()
+        if legend:
+            ## check existance.
+            if not osp.exists(legend):
+                self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Invalid Path")
+                return
+            ## check extension.
+            if osp.splitext(legend)[1].lower()!=".txt":
+                self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Only (.txt) file accepted.")
+                return
+            
+        ## Save settings.
         self.selectedOption = self.comboBox.currentIndex()
-        self.selectedLegendFile = self.legendPathEditTxt.text()
-
-        if isWid2Visible:
-            self.selectedPath= self.dirpathEditTxt.text()
-        else:
-            self.selectedPath = self.videoPathEditTxt.text()
-
+        self.selectedPath = path
+        self.selectedLegendFile = legend
+        
         #print(self.selectedOption, self.selectedPath, self.selectedLegendFile)
         self.accept()
 
@@ -203,8 +202,7 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
             )
         )
 
-        if targetPath:
-            self.dirpathEditTxt.setText(targetPath)
+        self.dirpathEditTxt.setText(targetPath)
 
     def selectVideoLblFile(self):
         defaultDirPath = self.selectedPath if self.selectedPath else "."
@@ -215,9 +213,7 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
             self.tr("File (*.json)"),
         )
 
-        if targetPath:
-            self.videoPathEditTxt.setText(targetPath)
-            self.checkVideoFileExt()
+        self.videoPathEditTxt.setText(targetPath)
 
     def selectLegendFile(self):
         defaultDir = self.dirpathEditTxt.text() if self.dirpathEditTxt.text() else self.selectedPath
@@ -230,28 +226,34 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
             self.tr("File (*.txt)"),
         )
 
-        if selectedFilePath:
-            self.legendPathEditTxt.setText(selectedFilePath)
-            self.checkLegendFileExt()
+        self.legendPathEditTxt.setText(selectedFilePath)
 
-    def checkVideoFileExt(self):
+    def isVideoPathEmpty(self):
         path = self.videoPathEditTxt.text()
-        if path and osp.splitext(path)[1].lower()!=".json":
-            self.showError(self.videoPathEditTxt, self.videoPathErrorLbl, "*** Only (.json) file accepted")  
+        self.applyBtn.setEnabled(not path=="")
 
-    def checkLegendFileExt(self):
-        path = self.legendPathEditTxt.text()
-        if path and osp.splitext(path)[1].lower()!=".txt":
-            self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Only (.txt) file accepted.")
-            
+    def isDirPathEmpty(self):
+        path = self.dirpathEditTxt.text()
+        self.applyBtn.setEnabled(not path=="")
+
+    def typeSelectionChanged(self):
+        flag = self.comboBox.currentIndex()==2
+        self.widget3.setVisible(flag)
+        self.widget2.setVisible(not flag)
+
+        self.widget4.setVisible(self.comboBox.currentIndex()==1)
+
+        self.adjustSize()
 
     def hideError(self, label, editTxt):
         label.setVisible(False)
         editTxt.setStyleSheet("")
+        self.adjustSize()
 
     def showError(self, editTxt, label, text):
         editTxt.setStyleSheet("border: 1px solid red")
         label.setText(text)
         label.setVisible(True)
+        self.adjustSize()
         timer = QTimer()
         timer.singleShot(5000, lambda: self.hideError(label,editTxt))
