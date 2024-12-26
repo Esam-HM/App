@@ -72,7 +72,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lblFileLoaders = {
             0: lambda x,y,z=False: self.loadAppJsonFile(x,y,z),
             1: lambda x,y,z=False: self.loadTxtFile(x,y,z),
-            2: lambda x,y,z=False: self.loadVideoFile(x,y,z),
+            2: lambda x,_,z=False: self.loadVideoFile(x,z),
         }
 
         if output_file is not None and self._config["auto_save"]:
@@ -1045,7 +1045,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
         ### Mark file item if already has label file
         for filename in filenames:
-            labelfile = osp.splitext(filename)[0] + self.getlblFileExt
+            labelfile = osp.splitext(filename)[0] + ".json"
             if self.output_dir:
                 label_file_without_path = osp.basename(labelfile)
                 labelfile = osp.join(self.output_dir, label_file_without_path)
@@ -1084,6 +1084,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ])
         
         self.filename = None
+        self.resetFileListWidget(load=False)
         for file in imageFiles:
             if file in self.imageList or not file.lower().endswith(extensions):
                 continue
@@ -1096,7 +1097,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
                 item.setCheckState(Qt.Checked)
             else:
-                item.setCheckState(Qt.UnChecked)
+                item.setCheckState(Qt.Unchecked)
             self.fileListWidget.addItem(item)
 
             if len(imageFiles) > 1:
@@ -1156,7 +1157,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if answer != mb.Yes:
             return
 
-        label_file = self.getLabelFile()
+        label_file = self.getOutputFile()
         if osp.exists(label_file):
             os.remove(label_file)
             logger.info("Label file is removed: {}".format(label_file))
@@ -1292,16 +1293,27 @@ class MainWindow(QtWidgets.QMainWindow):
             prev_shapes = self.canvas.shapes
         self.canvas.loadPixmap(QtGui.QPixmap.fromImage(image))
         flags = {k: False for k in self._config["flags"] or []}
-        if self.labelFile:
-            self.loadLabels(self.labelFile.shapes)
-            if self.labelFile.flags is not None:
-                flags.update(self.labelFile.flags)
+        if self.yoloModel.predictions and self.fileListWidget.count()>0:
+            self.loadLabels(self.yoloModel.getCurrentImagePrediction(self.fileListWidget.currentRow()))
+            self.actions.editMode.setEnabled(True)
+            self.actions.undo.setEnabled(True)
+            self.setDirty()
+        else:
+            if self.labelFile:
+                self.loadLabels(self.labelFile.shapes)
+                if self.labelFile.flags is not None:
+                    flags.update(self.labelFile.flags)
+            self.setClean()
+        # if self.labelFile:
+        #     self.loadLabels(self.labelFile.shapes)
+        #     if self.labelFile.flags is not None:
+        #         flags.update(self.labelFile.flags)
         self.loadFlags(flags)
         if self._config["keep_prev"] and self.noShapes(): ## Load previous shapes.
             self.loadShapes(prev_shapes, replace=False)
             self.setDirty()
-        else:
-            self.setClean()
+        #else:
+            #self.setClean()
         self.canvas.setEnabled(True)
         # set zoom values
         is_initial_load = not self.zoom_values
@@ -1344,11 +1356,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addRecentFile(self.filename)
         self.toggleActions(True)
         self.toggleRunYoloBtns()
-        self.canvas.setFocus()
+        #self.canvas.setFocus()
         self.status(str(self.tr("Loaded %s")) % osp.basename(str(filename)))
         return True
     
-    def loadAppJsonFile(self, filename, label_file, load=False):
+    def loadAppJsonFile(self, filename:str, label_file:str, load=False):
          ## Checks if .json label file found first in the same img path.
         if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
             try:
@@ -1379,7 +1391,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.imagePath = filename
             self.labelFile = None
     
-    def loadTxtFile(self, filename=None, label_file=None, loadAnnOnly=False):
+    def loadTxtFile(self, filename:str=None, label_file:str=None, loadAnnOnly=False):
         if not loadAnnOnly:
             self.imageData = LabelFile.load_image_file(filename)
             if not self.imageData:
@@ -1390,32 +1402,37 @@ class MainWindow(QtWidgets.QMainWindow):
             self.labelFile = LabelFile()
             self.labelFile.imageData = self.imageData
             self.labelFile.imagePath = self.imagePath
-            self.labelFile.loadYoloTxtFile(label_file)
+            self.labelFile.loadYoloTxtFile(label_file, self.legendFilePath)
             if loadAnnOnly:
                 self.loadLabels(self.labelFile.shapes,loadAnnOnly)
         else:
             self.labelFile = None
 
-    def loadVideoFile(self, filename, label_file, loadAnnOnly= False):
+    def loadVideoFile(self, filename:str, loadAnnOnly= False):
         ## check for list
         self.imageData = LabelFile.load_image_file(filename)
         if not self.imageData:
             return
         
         self.imagePath = filename
-
-        def getCurrentFrameID():
-            file = self.fileListWidget.currentIndex()
-            print(file)
-
-        if osp.exists(label_file) and osp.splitext(label_file)[1]==".json":
+        
+        if osp.exists(self.videoLblFile) and osp.splitext(self.videoLblFile)[1]==".json":
             self.labelFile = LabelFile()
             self.labelFile.imageData = self.imageData
             self.labelFile.imagePath = self.imagePath
-            getCurrentFrameID()
-            #self.labelFile.loadVideoLabelFile(label_file)
-
-        print("Here")
+            id = self.fileListWidget.currentRow()
+            ## to handle key errors.
+            try:
+                self.labelFile.loadVideoLabelFile(self.videoLblFile, id, self.fileListWidget.count())
+            except:
+                self.errorMessage("Error Reading Label File",
+                                  "Make sure the video label file '%s' has a correct format." % self.videoLblFile
+                )
+                self.labelFile = None
+                return
+        else:
+            self.labelFile = None
+        print("Video Label file loaded..!!")
            
     
     @property
@@ -1767,9 +1784,21 @@ class MainWindow(QtWidgets.QMainWindow):
         return (0, 255, 0)
     
     ## FIXME: Not Holding output dir change statement !!!! 
-    def getLabelFile(self):
+    # def getLabelFile(self):
+    #     if self.filename.lower().endswith(".json"):
+    #         label_file = self.filename
+    #     else:
+    #         label_file = osp.splitext(self.filename)[0] + ".json"
+
+    #     return label_file
+
+    def getOutputFile(self):
         if self.filename.lower().endswith(".json"):
-            label_file = self.filename
+            return self.filename
+
+        if self.output_dir:
+            label_file = osp.splitext(self.filename)[0] + ".json"
+            label_file = osp.join(self.output_dir, osp.basename(label_file))
         else:
             label_file = osp.splitext(self.filename)[0] + ".json"
 
@@ -1779,7 +1808,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.filename is None:
             return False
         
-        label_file = self.getLabelFile()
+        label_file = self.getOutputFile()
         return osp.exists(label_file)
 
     ###############   Flags    ###################
@@ -2101,7 +2130,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.dirty:
             return True
         mb = QtWidgets.QMessageBox
-        msg = self.tr('Save annotations to "{}" before closing?').format(self.getLabelFile())
+        msg = self.tr('Save annotations to "{}" before closing?').format(self.getOutputFile())
         answer = mb.question(
             self,
             self.tr("Save annotations?"),
@@ -2153,7 +2182,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ])
         if event.mimeData().hasUrls():
             items = [i.toLocalFile() for i in event.mimeData().urls()]
-            if any([i.lower().endswith(extensions) for i in items]):
+            if (any([i.lower().endswith(extensions) for i in items])) or (osp.isdir(items[0]) and osp.exists(items[0])):
                 event.accept()
         else:    
             event.ignore()
@@ -2164,7 +2193,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         
         items = [i.toLocalFile() for i in event.mimeData().urls()]
-        self.importDroppedImageFiles(items)
+        if osp.isdir(items[0]):
+            self.importDirImages(items[0])
+        else:
+            self.importDroppedImageFiles(items)
     
     ## override main window resize event. 
     def resizeEvent(self, event):
@@ -2534,7 +2566,8 @@ class MainWindow(QtWidgets.QMainWindow):
     ## to open specific types of label files.
     def changeLabelFileType(self):
         dirPath = osp.dirname(self.imagePath) if self.imagePath else None
-        dirPath = dirPath if dirPath else self.labelFilesDir
+        if self.labelFilesDir:
+            dirPath = self.labelFilesDir
         dialog = OpenLabelFilesDialog(self.labelFileType, dirPath, self.videoLblFile)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             self.labelFileType = dialog.getCurrentOption
@@ -2575,201 +2608,111 @@ class MainWindow(QtWidgets.QMainWindow):
     ##########  AI Actions ###########
     
     ## Object detection on single image
-    def runYolo(self, track=False):
+    def runYolo(self):
         self._runYoloButton.setEnabled(False)
         self.status("Making predictions....")
 
         if not self.imagePath:
             self.errorMessage("Error",
-                              "<p>Image not found. <br/> Please load image to make detection.</p>")
-
+                              "<p>Image not found.<br>Please load image to make detection.</p>")
             return
 
         if not self.yoloModel.loadModel():
-            print("Failure")
+            self._runYoloButton.setEnabled(True)
             return
 
-        results = self.yoloModel.getResults(self.imagePath)
-        if results is None:
+        res = self.yoloModel.runModel(self.imagePath)
+        if not res:
             self.status("No Object detected on current image")
+            self._runYoloButton.setEnabled(True)
             return
-
-        for result in results:
-            if len(result.boxes.xyxy) > 0:
-                point_list = result.boxes.xyxy.tolist()
-
-                pred_shapes = []
-                i = 0
-                for shapepoints in point_list:
-                    qpoint_list = [QtCore.QPointF(shapepoints[0], shapepoints[1]), QtCore.QPointF(shapepoints[2], shapepoints[3])]
-                    id = None
-                    if track:
-                        id = int(result.boxes.id[i].item())
-
-                    pred_shapes.append(Shape(
-                    label=result.names[int(result.boxes.cls[i])],
-                    group_id=id,
-                    flags={},
-                    line_color=None,
-                    shape_type="rectangle",
-                    description=None,
-                    ))
-
-                    pred_shapes[-1].addPoint(qpoint_list[0])
-                    pred_shapes[-1].addPoint(qpoint_list[1])
-                    i += 1
-
-                self.loadShapes(pred_shapes,replace=True)
+        
+        #print(self.yoloModel.getCurrentImagePrediction(0))
+        self.loadLabels(res,True)
         
         self._runYoloButton.setEnabled(True)
-
-    def runYoloWithModel(self, track=False):
-        if not self.imagePath:
-            return
-        self.yoloModel.track = track
-        results = self.yoloModel.getResults(self.imagePath)
-        if results is None:
-            return
-        for result in results:
-            if len(result.boxes.xyxy) > 0:
-                point_list = result.boxes.xyxy.tolist()
-
-                pred_shapes = []
-                i = 0
-                for shapepoints in point_list:
-                    qpoint_list = [QtCore.QPointF(shapepoints[0], shapepoints[1]), QtCore.QPointF(shapepoints[2], shapepoints[3])]
-                    id = None
-                    if track:
-                        id = int(result.boxes.id[i].item())
-
-                    pred_shapes.append(Shape(
-                    label=result.names[int(result.boxes.cls[i])],
-                    group_id=id,
-                    flags={},
-                    line_color=None,
-                    shape_type="rectangle",
-                    description=None,
-                    ))
-
-                    pred_shapes[-1].addPoint(qpoint_list[0])
-                    pred_shapes[-1].addPoint(qpoint_list[1])
-                    i += 1
-
-                self.loadShapes(pred_shapes,replace=True)
+        self.actions.editMode.setEnabled(True)
+        self.actions.undo.setEnabled(True)
+        self.setDirty()
+        self.yoloModel.resetPredictions()
 
     def runYoloVid(self, track = False):
-        # the real code is above
-        # if not (self.model_path and self.model_path.split(".")[-1] == "pt"):
-        #     self.errorDialogue.setText(self.tr("Model cannot found!"))
-        #     self.errorDialogue.show()
-        #     return
+        self._runYoloVidButton.setEnabled(False)
 
-        # if(self.fileListWidget.count() <= 0):
-        #     self.errorDialogue.setText(self.tr("No frame found!"))
-        #     self.errorDialogue.show()
-        #     return
         if self.fileListWidget.count()<=0:
             self.errorMessage("Error","<p>Files list is empty.</p>")
+            self._runYoloVidButton.setEnabled(True)
             return
         
-        if not self.yoloModel.loadModel():
-            return
-        
-        progress = QtWidgets.QProgressDialog("Running Model on Video", "Cancel", 0, self.fileListWidget.count(), self)
+        progress = QtWidgets.QProgressDialog("Running Model on Frames", "Cancel", 0, self.fileListWidget.count(), self)
         progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
 
-        #model = YoloModel(self.model_path,track=track)
+        if not self.yoloModel.loadModel():
+            self._runYoloVidButton.setEnabled(True)
+            progress.hide()
+            return
 
-        for i in range(self.fileListWidget.count()):
+        images = self.imageList
+
+        self.yoloModel.resetPredictions()
+
+        for i in range(0,self.fileListWidget.count()):
             progress.setValue(i)
 
-            if progress.wasCanceled():
-                break
-
-            self.loadFile(self.fileListWidget.item(i).text())
-            self.runYoloWithModel(track=track)
-            self.saveFileAuto()
-            #time.sleep(2)
-
+            if not progress.wasCanceled():
+                self.yoloModel.runModelOnVideo(images[i])
+        
+        print(len(self.yoloModel.predictions))
+        self.loadLabels(self.yoloModel.getCurrentImagePrediction(self.fileListWidget.currentRow()))
         progress.setValue(self.fileListWidget.count())
+        self._runYoloVidButton.setEnabled(True)
+
+        self.actions.editMode.setEnabled(True)
+        self.actions.undo.setEnabled(True)
+        self.setDirty()
 
     def runYoloTrack(self):
-        self.runYoloVid(track=True)
+        self._runYoloTrackButton.setEnabled(False)
 
-    def runYoloJson(self,path):
-
-        def format_shape(s):
-            data = s.other_data.copy()
-            data.update(
-                dict(
-                    label=s.label.encode("utf-8") if PY2 else s.label,
-                    points=[(p.x(), p.y()) for p in s.points],
-                    group_id=s.group_id,
-                    description=s.description,
-                    shape_type=s.shape_type,
-                    flags=s.flags,
-                    mask=None if s.mask is None else utils.img_arr_to_b64(s.mask),
-                )
-            )
-            return data
-
-        model = YoloModel(self.model_path)
-
-        results = model.getResults(path)
-        if results is None:
+        if self.fileListWidget.count()<=0:
+            self.errorMessage("Error","<p>Files list is empty.</p>")
+            self._runYoloTrackButton.setEnabled(True)
             return
-        for result in results:
-            if len(result.boxes.xyxy) > 0:
-                point_list = result.boxes.xyxy.tolist()
+        
+        progress = QtWidgets.QProgressDialog("Running Model on Frames", "Cancel", 0, self.fileListWidget.count(), self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
 
-                pred_shapes = []
-                i = 0
-                for shapepoints in point_list:
-                    qpoint_list = [QtCore.QPointF(shapepoints[0], shapepoints[1]), QtCore.QPointF(shapepoints[2], shapepoints[3])]
+        if not self.yoloModel.loadModel():
+            self._runYoloVidButton.setEnabled(True)
+            progress.hide()
+            return
 
-                    pred_shapes.append(Shape(
-                    label=result.names[int(result.boxes.cls[i])],
-                    group_id=None,
-                    flags={},
-                    line_color=None,
-                    shape_type="rectangle",
-                    description=None,
-                    ))
+        images = self.imageList
+        self.yoloModel.resetPredictions()
 
-                    pred_shapes[-1].addPoint(qpoint_list[0])
-                    pred_shapes[-1].addPoint(qpoint_list[1])
-                    i += 1
+        for i in range(0,self.fileListWidget.count()):
+            progress.setValue(i)
 
-                lf = LabelFile()
-
-                imagefile = QtGui.QImage(path)
-                jsonfile = os.path.splitext(path)[0] + ".json"
-
-                lf.change_and_save(
-                    filename=jsonfile,
-                    shapes=[format_shape(shape) for shape in pred_shapes],
-                    imagePath=path,
-                    imageHeight=imagefile.height(),
-                    imageWidth=imagefile.width(),
-                )
-
-        return
-
-    def saveFileAuto(self, _value=False):
-        assert not self.image.isNull(), "cannot save empty image"
-        if self.labelFile:
-            self._saveFile(self.labelFile.filename)
-        elif self.output_file:
-            self._saveFile(self.output_file)
-            self.close()
-        else:
-            self._saveFile(self.filename.split(".")[0] + ".json")
+            if not progress.wasCanceled():
+                self.yoloModel.runModelWithTrack(images[i])
+        
+        print(len(self.yoloModel.predictions))
+        self.loadLabels(self.yoloModel.getCurrentImagePrediction(self.fileListWidget.currentRow()))
+        progress.setValue(self.fileListWidget.count())
+        self._runYoloTrackButton.setEnabled(True)
+        
+        self.actions.editMode.setEnabled(True)
+        self.actions.undo.setEnabled(True)
+        self.setDirty()
 
     def selectObjModel(self):
+        defaultPath = osp.dirname(self.yoloModel.modelPath) if self.yoloModel.modelPath else "."
         model_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             self.tr("%s - Choose AI Model File") % __appname__,
-            ".",
+            defaultPath,
             self.tr("Model Files (*.pt)"),
         )
         if not model_path:

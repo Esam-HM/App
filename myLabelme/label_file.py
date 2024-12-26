@@ -192,9 +192,9 @@ class LabelFile(object):
     def is_label_file(filename):
         return osp.splitext(filename)[1].lower() == LabelFile.suffix
     
-    def loadYoloTxtFile(self, filename):
+    def loadYoloTxtFile(self, filename:str, legendFilePath:str=None):
         data = self.loadTxtFileData(filename)
-        self.shapes = self.txtDataToJsonData(data)
+        self.shapes = self.txtDataToJsonData(data, legendFilePath)
         self.filename = filename
         self.flags = None
         
@@ -231,13 +231,25 @@ class LabelFile(object):
         
         return pp
     
-    def txtDataToJsonData(self,data):
+    def txtDataToJsonData(self,data, legendPath):
+        classes = []
+        if legendPath and osp.exists(legendPath):
+            try:
+                with open(legendPath, "r") as f:
+                    lines = f.readlines()
+                for line in lines:
+                    classes.append(line.strip())
+            except Exception as e:
+                logger.error(
+                    "Error reading legend file."
+                )
+
         shapes = []
         for key, values in data.items():
             for value in values:
                 shape = {}
                 shape["group_id"] = None
-                shape["label"] = str(key)
+                shape["label"] = classes[key] if classes else str(key)
                 shape["description"] = None
                 shape["shape_type"] = "rectangle"
                 shape["flags"] = {}
@@ -252,52 +264,117 @@ class LabelFile(object):
         
         return shapes
     
-    def loadVideoLabelFile(self,frameNo=-1):
+    def loadVideoLabelFile(self, filename:str, frameIdx:int, framesCount:int):
+
+        def getFrameIdx(arr, target):
+            low, high = 0, len(arr) - 1
+            while low <= high:
+                mid = (low + high) // 2
+                if int(arr[mid]["frame"]) == target:
+                    return mid
+                elif int(arr[mid]["frame"]) < target:
+                    low = mid + 1
+                else:
+                    high = mid - 1
+            return -1
         
-        pass
-    
-    def change_and_save(
-        self,
-        filename,
-        shapes,
-        imagePath,
-        imageHeight,
-        imageWidth,
-        imageData=None,
-        otherData=None,
-        flags=None,
-    ):
-        if(not osp.exists(filename)):
-            with open(filename, 'w'):
-                pass
-        else:  
-            self.load(filename)
-
-        if imageData is not None:
-            imageData = base64.b64encode(imageData).decode("utf-8")
-            imageHeight, imageWidth = self._check_image_height_and_width(
-                imageData, imageHeight, imageWidth
-            )
-        if otherData is None:
-            otherData = {}
-        if flags is None:
-            flags = {}
-
-        data = dict(
-            version=__version__,
-            flags=flags,
-            shapes=self.shapes + shapes,
-            imagePath=imagePath,
-            imageData=imageData,
-            imageHeight=imageHeight,
-            imageWidth=imageWidth,
-        )
-        for key, value in otherData.items():
-            assert key not in data
-            data[key] = value
         try:
-            with open(filename, "w") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            with open(filename, "r") as f:
+                data = json.load(f)
+            
+            totalObjects = data[0]["annotations"][0]["result"]
+
+            if len(totalObjects)>0:
+                totalFrames = totalObjects[0]["value"]["framesCount"]
+                interval = round(totalFrames/framesCount)
+                frameNo = frameIdx*interval + 1 ## current frame
+            else:    
+                print("No annotations in current frame")
+                self.filename = filename
+                self.flags = None
+                return
+            
+            # ids = []
+            # for i in range(len(totalObjects)):
+            #     ids[i] = totalObjects[i]["id"]
+                
+            imgShape = self.getImageShapes()
+            for i,obj in enumerate(totalObjects):
+                frames = obj["value"]["sequence"]
+                idx = getFrameIdx(frames,frameNo)
+                if idx !=-1: ## if -1 >> object not found in current frame.
+                    shape = {}
+                    shape["group_id"] = i
+                    shape["label"] = obj["value"]["labels"][0]
+                    shape["description"] = None
+                    shape["shape_type"] = "rectangle"
+                    shape["flags"] = {}
+                    shape["mask"] = None
+                    shape["points"] = []
+                    shape["other_data"] = {}
+
+                    koords = self.getVideoObjectKoords(frames[idx], imgShape)
+                    
+                    for x,y in koords:
+                        shape["points"].append([x,y])
+                    
+                    self.shapes.append(shape)
+            
             self.filename = filename
+            self.flags = None
         except Exception as e:
             raise LabelFileError(e)
+
+    def getVideoObjectKoords(self, koords, imgShape):
+        x = int(imgShape[1]*koords["x"]/100)
+        y = int(imgShape[0]*koords["y"]/100)
+        width = int(imgShape[1]*koords["width"]/100)
+        height = int(imgShape[0]*koords["height"]/100)
+
+        return [[x,y], [x+width,y+height]]
+
+    # def change_and_save(
+    #     self,
+    #     filename,
+    #     shapes,
+    #     imagePath,
+    #     imageHeight,
+    #     imageWidth,
+    #     imageData=None,
+    #     otherData=None,
+    #     flags=None,
+    # ):
+    #     if(not osp.exists(filename)):
+    #         with open(filename, 'w'):
+    #             pass
+    #     else:  
+    #         self.load(filename)
+
+    #     if imageData is not None:
+    #         imageData = base64.b64encode(imageData).decode("utf-8")
+    #         imageHeight, imageWidth = self._check_image_height_and_width(
+    #             imageData, imageHeight, imageWidth
+    #         )
+    #     if otherData is None:
+    #         otherData = {}
+    #     if flags is None:
+    #         flags = {}
+
+    #     data = dict(
+    #         version=__version__,
+    #         flags=flags,
+    #         shapes=self.shapes + shapes,
+    #         imagePath=imagePath,
+    #         imageData=imageData,
+    #         imageHeight=imageHeight,
+    #         imageWidth=imageWidth,
+    #     )
+    #     for key, value in otherData.items():
+    #         assert key not in data
+    #         data[key] = value
+    #     try:
+    #         with open(filename, "w") as f:
+    #             json.dump(data, f, ensure_ascii=False, indent=2)
+    #         self.filename = filename
+    #     except Exception as e:
+    #         raise LabelFileError(e)

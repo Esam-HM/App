@@ -131,12 +131,7 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         self.videoPathEditTxt.textChanged.connect(self.isVideoPathEmpty)
         self.dirpathEditTxt.textChanged.connect(self.isDirPathEmpty)
         self.comboBox.currentIndexChanged.connect(self.typeSelectionChanged)
-        self.comboBox.currentIndexChanged.emit(self.comboBox.currentIndex())
 
-        if self.widget2.isVisible():
-            self.isDirPathEmpty()
-        else:
-            self.isVideoPathEmpty()
 
     @property
     def getCurrentOption(self):
@@ -201,19 +196,27 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
                 | QtWidgets.QFileDialog.DontResolveSymlinks,
             )
         )
-
-        self.dirpathEditTxt.setText(targetPath)
+        if targetPath:
+            self.dirpathEditTxt.setText(targetPath)
 
     def selectVideoLblFile(self):
-        defaultDirPath = self.selectedPath if self.selectedPath else "."
+        if self.videoPathEditTxt.text() and osp.exists(self.videoPathEditTxt.text()):
+            defaultDirPath = self.videoPathEditTxt.text()
+        else:
+            if self.selectedPath:
+                defaultDirPath = self.selectedPath
+            else:
+                defaultDirPath="."
+
         targetPath,_ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             self.tr("%s - Choose Label file") % __appname__,
             defaultDirPath,
             self.tr("File (*.json)"),
         )
-
-        self.videoPathEditTxt.setText(targetPath)
+        
+        if targetPath:
+            self.videoPathEditTxt.setText(targetPath)
 
     def selectLegendFile(self):
         defaultDir = self.dirpathEditTxt.text() if self.dirpathEditTxt.text() else self.selectedPath
@@ -226,7 +229,8 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
             self.tr("File (*.txt)"),
         )
 
-        self.legendPathEditTxt.setText(selectedFilePath)
+        if selectedFilePath:
+            self.legendPathEditTxt.setText(selectedFilePath)
 
     def isVideoPathEmpty(self):
         path = self.videoPathEditTxt.text()
@@ -242,8 +246,12 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         self.widget2.setVisible(not flag)
 
         self.widget4.setVisible(self.comboBox.currentIndex()==1)
-
         self.adjustSize()
+        if flag:
+            self.isVideoPathEmpty()
+        else:
+            self.isDirPathEmpty()
+        
 
     def hideError(self, label, editTxt):
         label.setVisible(False)
@@ -257,3 +265,7 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         self.adjustSize()
         timer = QTimer()
         timer.singleShot(5000, lambda: self.hideError(label,editTxt))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.typeSelectionChanged()
