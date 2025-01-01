@@ -33,6 +33,8 @@ class LabelFileError(Exception):
 
 class LabelFile(object):
     suffix = ".json"
+    outputFormats = {"Labelme": ".json", "YOLO": ".txt"}
+    outputSuffixes = {0: ".json", 1: ".txt"}
 
     def __init__(self, filename=None):
         self.shapes = []
@@ -41,6 +43,8 @@ class LabelFile(object):
         if filename is not None:
             self.load(filename)
         self.filename = filename
+        self.imageHeight = None
+        self.imageWidth = None
 
     @staticmethod
     def load_image_file(filename):
@@ -191,21 +195,21 @@ class LabelFile(object):
     @staticmethod
     def is_label_file(filename):
         return osp.splitext(filename)[1].lower() == LabelFile.suffix
-    
-    def loadYoloTxtFile(self, filename:str, legendFilePath:str=None):
-        data = self.loadTxtFileData(filename)
-        self.shapes = self.txtDataToJsonData(data, legendFilePath)
-        self.filename = filename
-        self.flags = None
         
     def getImageShapes(self):
         imgArr = utils.img_data_to_arr(self.imageData)
         return imgArr.shape[:2]
 
+## Yolo Format Label file
+class YoloLabelFile(LabelFile):
+    #LabelFile.suffix = ".txt"
+    legend = []
+    def __init__(self):
+        super().__init__(None)
+
     def loadTxtFileData(self, filename):
         with open(filename, "r") as f:
             lines = f.readlines()
-        height, width = self.getImageShapes()
         pp = {}
         
         for line in lines:
@@ -213,12 +217,13 @@ class LabelFile(object):
             if data and len(data)==5:
                 try:
                     classID = int(data[0])
-                    x_center = float(data[1])*width
-                    y_center = float(data[2])*height
-                    box_width = float(data[3])*width
-                    box_height = float(data[4])*height
+                    x_center = float(data[1])*self.imageWidth
+                    y_center = float(data[2])*self.imageHeight
+                    box_width = float(data[3])*self.imageWidth
+                    box_height = float(data[4])*self.imageHeight
                 except ValueError:
-                    return
+                    logger.error("Error reading %s file" % filename)
+                    return {}
                  
                 x1 = int(x_center-box_width/2)
                 y1 = int(y_center-box_height/2)
@@ -231,25 +236,15 @@ class LabelFile(object):
         
         return pp
     
-    def txtDataToJsonData(self,data, legendPath):
-        classes = []
-        if legendPath and osp.exists(legendPath):
-            try:
-                with open(legendPath, "r") as f:
-                    lines = f.readlines()
-                for line in lines:
-                    classes.append(line.strip())
-            except Exception as e:
-                logger.error(
-                    "Error reading legend file."
-                )
 
-        shapes = []
+    def loadTxtFile(self, filename:str):
+        data = self.loadTxtFileData(filename)
+        ## convert to application format
         for key, values in data.items():
             for value in values:
                 shape = {}
                 shape["group_id"] = None
-                shape["label"] = classes[key] if classes else str(key)
+                shape["label"] = YoloLabelFile.legend[key] if len(YoloLabelFile.legend)> key else str(key)
                 shape["description"] = None
                 shape["shape_type"] = "rectangle"
                 shape["flags"] = {}
@@ -260,26 +255,79 @@ class LabelFile(object):
                 for x,y in value:
                     shape["points"].append([x,y])
                 
-                shapes.append(shape)
-        
-        return shapes
-    
-    def loadVideoLabelFile(self, filename:str, frameIdx:int, framesCount:int):
+                self.shapes.append(shape)
 
-        def getFrameIdx(arr, target):
-            low, high = 0, len(arr) - 1
-            while low <= high:
-                mid = (low + high) // 2
-                if int(arr[mid]["frame"]) == target:
-                    return mid
-                elif int(arr[mid]["frame"]) < target:
-                    low = mid + 1
-                else:
-                    high = mid - 1
-            return -1
-        
+        self.filename = filename
+        self.flags = None
+
+    @staticmethod
+    def loadLegendFile(filepath:str=None):
+        if not filepath:
+            return False
         try:
-            with open(filename, "r") as f:
+            legend = []
+            with open(filepath, "r") as f:
+                lines = f.readlines()
+            for line in lines:
+                legend.append(line.strip())
+
+            YoloLabelFile.legend = legend
+            return True
+        except Exception as e:
+            logger.error(
+                "Error reading legend file."
+            )
+            return False
+    
+    ## Override
+    def save(self,filename, shapes, imageSize):
+        ## class id, group id, x_center, y_center, box width, box height,
+        # shape_keys = [
+        #     "label",
+        #     "points",
+        #     "group_id",
+        #     "shape_type",
+        #     "flags",
+        #     "description",
+        #     "mask",
+        # ]
+        print("saving")
+        lines = []
+        for shape in shapes:
+            if shape.get("shape_type","") == "rectangle" and len(shape["points"])==2:
+                x1, y1 = shape["points"][0]
+                x2, y2 = shape["points"][1]
+
+                # Calculate center, width, and height
+                x_center = (x1+x2) / 2
+                y_center = (y1+y2) / 2
+                width = abs(x2-x1)
+                height = abs(y2-y1)
+
+                # Normalize
+                x_center = str(x_center/imageSize[0])
+                y_center = str(y_center/imageSize[1])
+                width = str(width/imageSize[0])
+                height = str(height/imageSize[1])
+
+                lines.append(f"{shape["label"]} {x_center} {y_center} {width} {height}\n")
+
+        try:
+            with open(filename, "w") as f:
+                f.writelines(lines)
+        except:
+            raise LabelFileError    
+
+
+## Label Studio Format Label File.
+class VideoLabelFile(LabelFile):
+    labelFilePath = None
+    def __init__(self):
+        super().__init__(None)
+
+    def loadVideoLabelFile(self, frameIdx:int, framesCount:int):
+        try:
+            with open(VideoLabelFile.labelFilePath, "r") as f:
                 data = json.load(f)
             
             totalObjects = data[0]["annotations"][0]["result"]
@@ -290,7 +338,7 @@ class LabelFile(object):
                 frameNo = frameIdx*interval + 1 ## current frame
             else:    
                 print("No annotations in current frame")
-                self.filename = filename
+                self.filename = VideoLabelFile.labelFilePath
                 self.flags = None
                 return
             
@@ -301,7 +349,7 @@ class LabelFile(object):
             imgShape = self.getImageShapes()
             for i,obj in enumerate(totalObjects):
                 frames = obj["value"]["sequence"]
-                idx = getFrameIdx(frames,frameNo)
+                idx = self.getFrameIdx(frames,frameNo)
                 if idx !=-1: ## if -1 >> object not found in current frame.
                     shape = {}
                     shape["group_id"] = i
@@ -320,10 +368,24 @@ class LabelFile(object):
                     
                     self.shapes.append(shape)
             
-            self.filename = filename
+            self.filename = VideoLabelFile.labelFilePath
             self.flags = None
         except Exception as e:
+            logger.error(e)
             raise LabelFileError(e)
+    
+    ## Binary search tree
+    def getFrameIdx(self, arr, target):
+        low, high = 0, len(arr) - 1
+        while low <= high:
+            mid = (low + high) // 2
+            if int(arr[mid]["frame"]) == target:
+                return mid
+            elif int(arr[mid]["frame"]) < target:
+                low = mid + 1
+            else:
+                high = mid - 1
+        return -1
 
     def getVideoObjectKoords(self, koords, imgShape):
         x = int(imgShape[1]*koords["x"]/100)
@@ -332,49 +394,3 @@ class LabelFile(object):
         height = int(imgShape[0]*koords["height"]/100)
 
         return [[x,y], [x+width,y+height]]
-
-    # def change_and_save(
-    #     self,
-    #     filename,
-    #     shapes,
-    #     imagePath,
-    #     imageHeight,
-    #     imageWidth,
-    #     imageData=None,
-    #     otherData=None,
-    #     flags=None,
-    # ):
-    #     if(not osp.exists(filename)):
-    #         with open(filename, 'w'):
-    #             pass
-    #     else:  
-    #         self.load(filename)
-
-    #     if imageData is not None:
-    #         imageData = base64.b64encode(imageData).decode("utf-8")
-    #         imageHeight, imageWidth = self._check_image_height_and_width(
-    #             imageData, imageHeight, imageWidth
-    #         )
-    #     if otherData is None:
-    #         otherData = {}
-    #     if flags is None:
-    #         flags = {}
-
-    #     data = dict(
-    #         version=__version__,
-    #         flags=flags,
-    #         shapes=self.shapes + shapes,
-    #         imagePath=imagePath,
-    #         imageData=imageData,
-    #         imageHeight=imageHeight,
-    #         imageWidth=imageWidth,
-    #     )
-    #     for key, value in otherData.items():
-    #         assert key not in data
-    #         data[key] = value
-    #     try:
-    #         with open(filename, "w") as f:
-    #             json.dump(data, f, ensure_ascii=False, indent=2)
-    #         self.filename = filename
-    #     except Exception as e:
-    #         raise LabelFileError(e)

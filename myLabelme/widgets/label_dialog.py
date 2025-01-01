@@ -242,3 +242,8 @@ class LabelDialog(QtWidgets.QDialog):
             )
         else:
             return None, None, None, None
+        
+    ## For legend File.
+    def addLabels(self, labels:list):
+        self.labelList.addItems(labels)
+

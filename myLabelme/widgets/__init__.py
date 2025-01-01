@@ -20,6 +20,10 @@ from .unique_label_qlist_widget import UniqueLabelQListWidget
 
 from .zoom_widget import ZoomWidget
 
-from .open_label_files_dialog import OpenLabelFilesDialog
+from .load_label_files_dialog import LoadLabelFilesDialog
 
 from .extract_frames_dialog import ExtractFramesDialog
+
+from .save_dialog import SaveDialog
+
+from .save_setting_dialog import SaveSettingDialog

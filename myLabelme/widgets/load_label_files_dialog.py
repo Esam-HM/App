@@ -4,7 +4,7 @@ from .. import __appname__
 from os import path as osp
 
 
-class OpenLabelFilesDialog(QtWidgets.QDialog):
+class LoadLabelFilesDialog(QtWidgets.QDialog):
     def __init__(self,selectedOption:int=0, dirPath:str=None, videoLblPath:str=None):
         super().__init__()
         self.selectedOption = selectedOption
@@ -16,19 +16,28 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         self.adjustSize()
 
     def initUI(self, videoLblPath):
-        options = ["Default app format (.json)", "YOlO format (.txt)", "Label studio video format (.json)"]
+        options = ["Default labelme app format (.json)", "YOLO format (.txt)", "Label studio video format (.json)"]
         
-        infoLbl = QtWidgets.QLabel(self)
-        infoLbl.setText(
-            '<p align="justify"> <strong>Info:</strong> Choose your label files format and directory of your images to load annotations when opening image/s.</p>'
+        # infoLbl = QtWidgets.QLabel(self)
+        # infoLbl.setText(
+        #     '<p align="justify"> <strong>Info:</strong> Choose your label files format and directory of your images to load annotations when opening image/s.</p>'
+        # )
+        infoLbl = QtWidgets.QLabel(
+            '''<p align="justify">
+            <strong>Info:</strong> Choose your label files format and directory of your images to load annotations when opening image/s.<br>
+            If YOLO format is your choice, include your txt legend file where each class is in a separate line.<br>
+            Example File:
+            <br>class1
+            <br>class2
+            <br>class3
+            </p>'''
         )
         infoLbl.setStyleSheet("color: #00f;")
         infoLbl.setWordWrap(True)
 
         ## Label file format selection
         layout1 = QtWidgets.QVBoxLayout()
-        lbl1 = QtWidgets.QLabel()
-        lbl1.setText("Select Label File Format:")
+        lbl1 = QtWidgets.QLabel("Select Label File Format:")
         self.comboBox = QtWidgets.QComboBox()
         self.comboBox.addItems(options)
         self.comboBox.setCurrentIndex(self.selectedOption)
@@ -40,8 +49,7 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         ## Label files directory selection
         self.widget2 = QtWidgets.QWidget()
         layout2 = QtWidgets.QVBoxLayout()
-        lbl2 = QtWidgets.QLabel()
-        lbl2.setText("Select Label Files Directory:")
+        lbl2 = QtWidgets.QLabel("Select Label Files Directory:")
         hLayout2 = QtWidgets.QHBoxLayout()
         self.dirpathEditTxt = QtWidgets.QLineEdit()
         self.dirpathEditTxt.setPlaceholderText("*Your Label Files Directory Path")
@@ -64,8 +72,7 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         ## Video Label file selection.
         self.widget3 = QtWidgets.QWidget()
         layout3 = QtWidgets.QVBoxLayout()
-        lbl3 = QtWidgets.QLabel()
-        lbl3.setText("Select Video Label File:")
+        lbl3 = QtWidgets.QLabel("Select Video Label File:")
         hLayout3 = QtWidgets.QHBoxLayout()
         self.videoPathEditTxt = QtWidgets.QLineEdit()
         self.videoPathEditTxt.setPlaceholderText("*Your Label File Path")
@@ -88,8 +95,7 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         ## Legend file selection.
         self.widget4 = QtWidgets.QWidget()
         layout4 = QtWidgets.QVBoxLayout()
-        lbl4 = QtWidgets.QLabel()
-        lbl4.setText("Select Labels Legend File (.txt):")
+        lbl4 = QtWidgets.QLabel("Select Labels Legend File (*.txt):")
         hLayout4 = QtWidgets.QHBoxLayout()
         self.legendPathEditTxt = QtWidgets.QLineEdit()
         self.legendPathEditTxt.setPlaceholderText("Your Legend File Path (*Optional)")
@@ -109,9 +115,9 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
 
         ## Buttons
         layout5 = QtWidgets.QHBoxLayout()
-        self.applyBtn = QtWidgets.QPushButton("Apply")
+        self.loadBtn = QtWidgets.QPushButton("Load")
         cancelBtn = QtWidgets.QPushButton("Cancel")
-        layout5.addWidget(self.applyBtn)
+        layout5.addWidget(self.loadBtn)
         layout5.addWidget(cancelBtn)
 
         mainLayout = QtWidgets.QVBoxLayout()
@@ -123,7 +129,7 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         mainLayout.addLayout(layout5)
         self.setLayout(mainLayout)
 
-        self.applyBtn.clicked.connect(self.applyChanges)
+        self.loadBtn.clicked.connect(self.applyChanges)
         cancelBtn.clicked.connect(lambda: self.reject())
         browseDirBtn.clicked.connect(self.selectLabelFilesDir)
         browseVideoBtn.clicked.connect(self.selectVideoLblFile)
@@ -133,15 +139,12 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
         self.comboBox.currentIndexChanged.connect(self.typeSelectionChanged)
 
 
-    @property
     def getCurrentOption(self):
         return self.selectedOption
     
-    @property
     def getSelectedPath(self):
         return self.selectedPath
 
-    @property
     def getSelectedLegend(self):
         return self.selectedLegendFile if self.selectedLegendFile!="" else None
 
@@ -234,11 +237,11 @@ class OpenLabelFilesDialog(QtWidgets.QDialog):
 
     def isVideoPathEmpty(self):
         path = self.videoPathEditTxt.text()
-        self.applyBtn.setEnabled(not path=="")
+        self.loadBtn.setEnabled(not path=="")
 
     def isDirPathEmpty(self):
         path = self.dirpathEditTxt.text()
-        self.applyBtn.setEnabled(not path=="")
+        self.loadBtn.setEnabled(not path=="")
 
     def typeSelectionChanged(self):
         flag = self.comboBox.currentIndex()==2
