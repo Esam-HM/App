@@ -64,7 +64,7 @@ class MainWindow(QtWidgets.QMainWindow):
             Qt.Vertical: {},
         }  # key=filename, value=scroll_value
         self.loadShapesFromFile=False
-        self.buffer = {}  ## key=imagePath, value={"shapes": [], "flags": {}, "undo": [], "image_size": [width, height], "isSaved": bool}
+        self.buffer = {}  ## key=imagePath, value={"shapes": [], "flags": {}, "undo": [], "image_size": [width, height], "dirty": bool}
         self.labelFileType = 0  ## 0: labelme, 1: yolo format, 2: video label studio format.
         self.labelFilesDir = None
         self.output_dir = output_dir
@@ -1053,43 +1053,38 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ## Load images to file list.
     ## Also used to search specific files
-    def importDirImages(self, dirpath, pattern=None, load=True):
+    def importDirImages(self, dirpath, load=True):
         if not self.mayContinue() or not dirpath:
             return
 
         self.lastOpenDir = dirpath
         self.filename = None
         self.fileListWidget.clear()
+        self.resetApplicationState()
+        self.resetFileListWidget(load=False)
 
         filenames = self.scanAllImages(dirpath)
         if not filenames:   ## FIXED
             return
-        
-        if load:
-            self.resetFileListWidget(load=False)
-            self.resetApplicationState()
-        ### For search in list.
-        ### Filter files for pattern to select specific one.
-        if pattern:
-            try:
-                filenames = [f for f in filenames if re.search(pattern,f)]
-            except re.error:
-                pass
+
         ### Mark file item if already has label file
-        for filename in filenames:
-            labelfile = osp.splitext(filename)[0] + ".json"
-            if self.output_dir:
-                label_file_without_path = osp.basename(labelfile)
-                labelfile = osp.join(self.output_dir, label_file_without_path)
-            item = QtWidgets.QListWidgetItem(filename)
-            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            if osp.exists(labelfile) and (LabelFile.is_label_file(labelfile) or osp.splitext(labelfile)[1]==".txt"):
-                item.setCheckState(Qt.Checked)
-            else:
-                item.setCheckState(Qt.Unchecked)
-            self.fileListWidget.addItem(item)
+        self.addFilesToFileList(filenames)
 
         self.openNextImg(load=load)
+
+    def addFilesToFileList(self, filenames):
+        for filename in filenames:
+            item = QtWidgets.QListWidgetItem(filename)
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            item.setCheckState(Qt.Unchecked)
+            if self.output_dir and self.outputFileFormat:
+                labelfile = osp.splitext(filename)[0] + LabelFile.outputSuffixes.get(self.outputFileFormat)
+                labelfile = osp.join(self.output_dir, osp.basename(labelfile))
+                if osp.exists(labelfile) and LabelFile.is_label_file(labelfile, self.outputFileFormat):
+                    item.setCheckState(Qt.Checked)
+                
+            self.fileListWidget.addItem(item)
+
 
     ## Get All images from given dir path.
     def scanAllImages(self, folderPath):
@@ -1104,6 +1099,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if file.lower().endswith(extensions):
                     relativePath = osp.normpath(osp.join(root,file))
                     images.append(relativePath)
+                    self.buffer[relativePath] = {}
 
         images = natsort.os_sorted(images)
         return images
@@ -1117,27 +1113,26 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.filename = None
         self.resetFileListWidget(load=False)
-        self.yoloModel.resetPredictions()
+
         for file in imageFiles:
-            if file in self.imageList or not file.lower().endswith(extensions):
-                continue
-            label_file = osp.splitext(file)[0] + ".json"
-            if self.output_dir:
-                label_file_without_path = osp.basename(label_file)
-                label_file = osp.join(self.output_dir, label_file_without_path)
-            item = QtWidgets.QListWidgetItem(file)
-            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
-                item.setCheckState(Qt.Checked)
-            else:
+            if file not in self.buffer and file.lower().endswith(extensions):
+                item = QtWidgets.QListWidgetItem(file)
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 item.setCheckState(Qt.Unchecked)
-            self.fileListWidget.addItem(item)
+                if self.output_dir and self.outputFileFormat:
+                    label_file = osp.splitext(file)[0] + LabelFile.outputSuffixes[self.outputFileFormat]
+                    label_file = osp.join(self.output_dir, osp.basename(label_file))
+                    if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file, self.outputFileFormat):
+                        item.setCheckState(Qt.Checked)
+                    
+                self.fileListWidget.addItem(item)
+                self.buffer[file] = {}
 
             if len(imageFiles) > 1:
                 self.actions.openNextImg.setEnabled(True)
                 self.actions.openPrevImg.setEnabled(True)
 
-            self.openNextImg()
+        self.openNextImg()
 
     ## Create open file dialog to open single file.
     def openFile(self, _value=False):
@@ -1145,17 +1140,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # if saved, continue.
         if not self.mayContinue():
             return
+        
+        #self.fileListWidget.clear()
+        #self.buffer.clear()
 
         path = osp.dirname(str(self.filename)) if self.filename else "."
         ## only open labelme (*.json) files.
-        #ext = "*.json" if self.labelFileType==0 else ""
+
         formats = [
             "*.{}".format(fmt.data().decode())
             for fmt in QtGui.QImageReader.supportedImageFormats()
         ]
-        # filters = self.tr("Image & Label files (%s)") % " ".join(
-        #     formats + ["%s" % ext]
-        # )
+        
         filters = self.tr("Image files (%s)") % " ".join(
             formats
         )
@@ -1169,8 +1165,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.loadFile(selectedFilePath)
 
     ## Closing opened file.
-    def closeFile(self, _value=False):
-        if not self.mayContinue(True):
+    def closeFile(self, _value=False, ask=True):
+        if ask and not self.mayContinue(True):
             return False
         self.resetState()
         self.setClean()
@@ -1214,30 +1210,34 @@ class MainWindow(QtWidgets.QMainWindow):
         ):
             self._config["keep_prev"] = True
 
-        # if not self.mayContinue():
-        #     return
-
-        if len(self.imageList) <=0:
+        if self.fileListWidget.count() <=0:
             return
 
-        filename = None
+        #filename = None
+        nextIndex = -1
         if self.filename is None:     ### initial load of dir.
-            filename = self.imageList[0]
+            nextIndex = 0
+            #filename = self.fileListWidget.item(0).text()
         else:           ### open next one.
             try:    #### fixed
-                currIndex = self.imageList.index(self.filename)
-            except ValueError:
-                self.errorMessage("Error Opening Image","Current image not found in file list")
+                #currIndex = self.imageList.index(self.filename)
+                currIndex = self.fileListWidget.currentRow()
+            except Exception:
+                self.errorMessage("Error Opening Image","Current image not found in the files list")
                 self._config["keep_prev"] = keep_prev
                 return
-            if currIndex+1 < len(self.imageList):
-                filename = self.imageList[currIndex+1]
-            else:
-                filename = self.imageList[-1]
-        self.filename = filename
+            
+            if currIndex+1 < self.fileListWidget.count():
+                #filename = self.fileListWidget.item(currIndex+1).text()
+                nextIndex = currIndex+1
 
-        if self.filename and load:
-            self.loadFile(self.filename)
+        #self.filename = filename
+
+        if nextIndex!=-1 and load:
+            #self.filename = self.fileListWidget.item(nextIndex).text()
+            self.fileListWidget.setCurrentRow(nextIndex)
+            self.fileListWidget.repaint()
+            #self.loadFile(self.filename)
 
         self._config["keep_prev"] = keep_prev
 
@@ -1249,39 +1249,36 @@ class MainWindow(QtWidgets.QMainWindow):
         ):
             self._config["keep_prev"] = True
 
-        if len(self.imageList)<=0:
+        if not self.filename or self.fileListWidget.count()<=0:
             return
-
-        # if not self.mayContinue() or len(self.imageList) <=0:
-        #     return
-
-        if self.filename is None:
-            return
-
 
         try:    #### fixed
-            currIndex = self.imageList.index(self.filename)
-        except ValueError:
+            #currIndex = self.imageList.index(self.filename)
+            #currIndex = 
+            prevIndex = self.fileListWidget.currentRow()-1
+        except Exception:
             self.errorMessage("Error Opening Image","Current image not found in files list")
             self._config["keep_prev"] = keep_prev
             return
-        if currIndex-1 >= 0:
-            filename = self.imageList[currIndex-1]
-            if filename:
-                self.loadFile(filename)
-
+        if prevIndex >= 0:
+            #filename = self.fileListWidget.item(prevIndex).text()
+            self.fileListWidget.setCurrentRow(prevIndex)
+            self.fileListWidget.repaint()
+            #self.loadFile(filename)
+            #if filename:
+                
         self._config["keep_prev"] = keep_prev
 
     ## Used to load label/image file.
     def loadFile(self, filename=None):
         """Load the specified file, or the last opened file if None."""
-        ### Mark the new loaded file
-        if filename in self.imageList and (
-            self.fileListWidget.currentRow() != self.imageList.index(filename)
-        ):
-            self.fileListWidget.setCurrentRow(self.imageList.index(filename))
-            self.fileListWidget.repaint()
-            return
+        ### Mark the new loaded file 
+        # if filename in self.imageList and (
+        #     self.fileListWidget.currentRow() != self.imageList.index(filename)
+        # ):
+        #     self.fileListWidget.setCurrentRow(self.imageList.index(filename))
+        #     self.fileListWidget.repaint()
+        #     return
 
         self.resetState()
         self.canvas.setEnabled(False)
@@ -1330,16 +1327,16 @@ class MainWindow(QtWidgets.QMainWindow):
             prev_shapes = self.canvas.shapes
         flags = {k: False for k in self._config["flags"] or []}
 
-        bufferedData = self.buffer.get(filename, {})
+        if filename not in self.buffer:
+            self.buffer[filename] = {}
 
-        if bufferedData:
+        if self.buffer[filename].get("shapes",None) is not None:
             print("load from buffer")
-            #if bufferedData.get("shapes"):
+            bufferedData = self.buffer[filename]
             self.loadShapes(bufferedData.get("shapes",[]))
-
             flags.update(bufferedData.get("flags",{}))
 
-            if not bufferedData.get("isSaved",True):
+            if bufferedData.get("dirty",False):
                 self.setDirty()
             else:
                 self.setClean()
@@ -1349,9 +1346,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.actions.undo.setEnabled(True)
 
         else:
-            #self.addImageToBuffer(filename)
-            self.buffer[filename] = {}
-
             self.buffer[filename]["image_size"] = [image.width(), image.height()]
 
             if self.loadShapesFromFile:
@@ -1363,11 +1357,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.loadLabels(self.labelFile.shapes)
                 if self.labelFile.flags is not None:
                     flags.update(self.labelFile.flags)
+                
             self.setClean()
-            
+        
+        if flags:
             self.buffer[self.imagePath]["flags"] = flags
+            self.buffer[self.imagePath]["shapes"] = []
+            self.loadFlags(flags)
 
-        self.loadFlags(flags)
         if self._config["keep_prev"] and self.noShapes(): ## Load previous shapes.
             self.loadShapes(prev_shapes, replace=False)
             self.setDirty()
@@ -1424,7 +1421,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ext = ".txt" if self.labelFileType==1 else ".json"
         label_file = osp.splitext(filename)[0] + ext
         label_file = osp.join(self.labelFilesDir,osp.basename(label_file))
-        if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
+        if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file, self.labelFileType):
             try:
                 self.labelFile = LabelFile(label_file)
             except LabelFileError as e:
@@ -1835,6 +1832,7 @@ class MainWindow(QtWidgets.QMainWindow):
     ###############   Flags    ###################
 
     def loadFlags(self, flags):
+        print("Flags")
         self.flag_widget.clear()
         for key, flag in flags.items():
             item = QtWidgets.QListWidgetItem(key)
@@ -1956,11 +1954,24 @@ class MainWindow(QtWidgets.QMainWindow):
     ################## File list Widget Functions  ################
 
     def fileSearchChanged(self):
-        self.importDirImages(
-            self.lastOpenDir,
-            self.fileSearch.text(),
-            False,
-        )
+        # self.importDirImages(
+        #     self.lastOpenDir,
+        #     self.fileSearch.text(),
+        #     False,
+        # )
+        self.fileListWidget.clear()
+        filenames = self.buffer.keys()
+        text = self.fileSearch.text()
+        if text:
+            try:
+                filenames = [f for f in filenames if re.search(text,f)]
+            except re.error:
+                pass
+        
+        self.addFilesToFileList(filenames)
+
+
+
     ## triggered when selecting new file item
     ## to load it.
     def fileSelectionChanged(self):
@@ -1970,18 +1981,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fileListEditBtn.setEnabled(isEnable and not self.fileListEditMode)
 
         if not self.fileListEditMode:   ## Do not load image when editing file list.
+            print("File Selection Changed")
             items = self.fileListWidget.selectedItems()
             if not items:
                 return
 
-            # if not items or not self.mayContinue():
-            #     return
-
             item = items[0]
-            currIndex = self.imageList.index(str(item.text()))
-            if currIndex < len(self.imageList):
-                filename = self.imageList[currIndex]
+            currIndex = self.fileListWidget.row(item)
+            if currIndex < self.fileListWidget.count():
+                filename = item.text()
                 if filename:
+                    self.actions.saveAll.setEnabled(self.isAllDirty())
                     self.loadFile(filename)
 
     ## Adding all files from fileList to image list.
@@ -2045,16 +2055,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if replay == mb.No: ## Do no thing.
             return
         else:       ## Delete items.
-            currItemRow = None
+            #currItemRow = None
             for item in items:
                 row = self.fileListWidget.row(item)
+                self.fileListWidget.takeItem(row)
+                self.buffer.pop(item.text())
                 if self.filename == item.text():
-                    currItemRow = row
-                else:
-                    self.fileListWidget.takeItem(row)
+                    self.closeFile(False)
+                # if self.filename == item.text():
+                #     currItemRow = row
+                # else:
+                #     self.fileListWidget.takeItem(row)
 
-            if currItemRow is not None and self.closeFile():
-                self.fileListWidget.takeItem(currItemRow)
+            # if currItemRow is not None and self.closeFile():
+            #     self.fileListWidget.takeItem(currItemRow)
 
             self.resetFileListWidget()
 
@@ -2173,8 +2187,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.otherData = None
         self.canvas.resetState()
 
-    def resetApplicationState(self):
-        self.buffer.clear()
+    def resetApplicationState(self, clearDataOnly:bool=False):
+        if clearDataOnly:
+            for file in self.buffer.keys():
+                self.buffer[file] = {}
+        else:
+            self.buffer.clear()
+
         self.labelFilesDir = None
         self.labelFileType = 0
         self.output_dir = None
@@ -2399,7 +2418,7 @@ class MainWindow(QtWidgets.QMainWindow):
         '''
         Save labels to output file.
         '''
-        print("3333")
+        print("saveLabels")
         def format_shape(s):
             data = s.other_data.copy()
             data.update(
@@ -2448,7 +2467,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if fileSuffix == LabelFile.outputSuffixes[1]:
                     lf = YoloLabelFile()
                     lf.save(filename, shapes, imgSize)
-            self.buffer[imgPath]["isSaved"] = True
+            self.buffer[imgPath]["dirty"] = False
             ##self.labelFile = lf
             items = self.fileListWidget.findItems(imgPath, Qt.MatchExactly)
                 
@@ -2465,25 +2484,40 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("Error saving label data"), self.tr("<b>%s</b>") % e
             )
             return False
+        
+    def isAllDirty(self):
+        i=0
+        dirty = False
+        while not dirty and i<self.fileListWidget.count():
+            image_path = self.fileListWidget.item(i).text()
+            dirty = self.buffer[image_path].get("dirty",False)
+            print(i)
+            i+=1
+            
+        
+        return dirty
 
     def saveAllOutputFiles(self):
-        print("All files saved")
-
-        
-
-    # def addImageToBuffer(self, image_path):
-    #     self.buffer[image_path] = {}
-    #     self.buffer[image_path]["shapes"] = []
-    #     self.buffer[image_path]["flags"] = {}
-    #     self.buffer[image_path]["isSaved"] = True
-    #     self.buffer[image_path]["image_size"] = []
-    #     self.buffer[image_path]["undo"] = []
+        '''
+        Save all images found in files list
+        '''
+        #print("All files saved")
+        if self.outputFileFormat is None or not self.output_dir:
+            if not self.setSaveSettings():
+                return
+            
+        for i in range(0,self.fileListWidget.count()):
+            image_path = self.fileListWidget.item(i)
+            if self.buffer.get("dirty", False):
+                self.saveLabels(image_path)
+            
+        self.actions.saveAll.setEnabled(False)
 
     def bufferCurrentStatus(self):
         assert self.imagePath, "Can not Buffer Current Status."
         #if self.imagePath:
-        if self.imagePath not in self.buffer:
-            self.buffer[self.imagePath] = {}
+        # if self.imagePath not in self.buffer:
+        #     self.buffer[self.imagePath] = {}
 
         shapes = [item.shape() for item in self.labelList]
 
@@ -2494,9 +2528,9 @@ class MainWindow(QtWidgets.QMainWindow):
             flag = item.checkState() == Qt.Checked
             flags[key] = flag
 
-        self.buffer[self.imagePath]["shapes"] = shapes          # list
-        self.buffer[self.imagePath]["flags"] = flags            # dict
-        self.buffer[self.imagePath]["isSaved"] = not self.dirty # bool
+        self.buffer[self.imagePath]["shapes"] = shapes      # list
+        self.buffer[self.imagePath]["flags"] = flags        # dict
+        self.buffer[self.imagePath]["dirty"] = self.dirty   # bool
         self.buffer[self.imagePath]["undo"] = self.canvas.shapesBackups # list
 
     ##############   Canvas   #############
@@ -2744,7 +2778,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = LoadLabelFilesDialog(self.labelFileType, dirPath, VideoLabelFile.labelFilePath)
 
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
-            self.resetApplicationState()
+            self.resetApplicationState(True)
             self.labelFileType = dialog.getCurrentOption()
 
             if YoloLabelFile.loadLegendFile(dialog.getSelectedLegend()):
@@ -2787,6 +2821,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ## Object detection on single image
     def runYolo(self):
+        if not self.mayContinue(True):
+            return
         self._runYoloButton.setEnabled(False)
         self.status("Making predictions....")
 
@@ -2815,6 +2851,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.yoloModel.resetPredictions()
 
     def runYoloVid(self):
+        if not self.mayContinue():
+            return
+        
         self._runYoloVidButton.setEnabled(False)
 
         if self.fileListWidget.count()<=0:
@@ -2831,30 +2870,36 @@ class MainWindow(QtWidgets.QMainWindow):
             progress.hide()
             return
 
-        images = self.imageList
+        images = self.buffer.keys()
 
         self.yoloModel.resetPredictions()
 
-        for i in range(0,len(images)):
+        for i, image in enumerate(images):
             progress.setValue(i)
 
             if not progress.wasCanceled():
-                self.yoloModel.runModelOnVideo(images[i])
-                anns = self.formatLabels(self.yoloModel.predictions[i])
-                if images[i] not in self.buffer:
-                    self.buffer[images[i]] = {"shapes": []}
-                self.buffer[images[i]]["shapes"] = anns
+                self.yoloModel.runModelOnVideo(image)
+                anns = self.formatPredictedShapes(self.yoloModel.predictions[i])
+                # if images[i] not in self.buffer:
+                #     self.buffer[images[i]] = {"shapes": []}
+                self.buffer[image]["shapes"] = anns
+                self.buffer[image]["dirty"] = True
+                self.buffer[image]["undo"] = []
 
         #print(len(self.yoloModel.predictions))
-        self.loadShapes(self.buffer[images[self.fileListWidget.currentRow()]].get("shapes",[]))
+        self.loadShapes(self.buffer[self.fileListWidget.currentItem().text()].get("shapes",[]))
         progress.setValue(self.fileListWidget.count())
-        self._runYoloVidButton.setEnabled(True)
 
+        self._runYoloVidButton.setEnabled(True)
         #self.actions.editMode.setEnabled(True)
         self.actions.undo.setEnabled(True)
+        self.actions.saveAll.setEnabled(True)
         self.setDirty()
 
     def runYoloTrack(self):
+        if not self.mayContinue():
+            return
+        
         self._runYoloTrackButton.setEnabled(False)
 
         if self.fileListWidget.count()<=0:
@@ -2871,30 +2916,29 @@ class MainWindow(QtWidgets.QMainWindow):
             progress.hide()
             return
 
-        images = self.imageList
+        images = self.buffer.keys()
         self.yoloModel.resetPredictions()
 
-        for i in range(0,len(images)):
+        for i, image in enumerate(images):
             progress.setValue(i)
 
             if not progress.wasCanceled():
-                self.yoloModel.runModelWithTrack(images[i])
-                anns = self.formatLabels(self.yoloModel.predictions[i])
-                if images[i] not in self.buffer:
-                    self.buffer[images[i]] = {"shapes": []}
-                self.buffer[images[i]]["shapes"] = anns
+                self.yoloModel.runModelWithTrack(image)
+                anns = self.formatPredictedShapes(self.yoloModel.predictions[i])
+                self.buffer[image]["shapes"] = anns
+                self.buffer[image]["dirty"] = True
+                self.buffer[image]["undo"] = []
 
-        #print(len(self.yoloModel.predictions))
-        self.loadShapes(self.buffer[images[self.fileListWidget.currentRow()]].get("shapes",[]))
-        #self.loadLabels(self.yoloModel.getCurrentImagePrediction(self.fileListWidget.currentRow()))
+        self.loadShapes(self.buffer[self.fileListWidget.currentItem().text()].get("shapes",[]))
         progress.setValue(self.fileListWidget.count())
 
         self._runYoloTrackButton.setEnabled(True)
         #self.actions.editMode.setEnabled(True)
         self.actions.undo.setEnabled(True)
+        self.actions.saveAll.setEnabled(True)
         self.setDirty()
 
-    def formatLabels(self, shapes):
+    def formatPredictedShapes(self, shapes):
         s = []
         for shape in shapes:
             label = shape["label"]

@@ -193,8 +193,8 @@ class LabelFile(object):
             raise LabelFileError(e)
 
     @staticmethod
-    def is_label_file(filename):
-        return osp.splitext(filename)[1].lower() == LabelFile.suffix
+    def is_label_file(filename, suffixId):
+        return osp.splitext(filename)[1].lower() == LabelFile.outputSuffixes[suffixId]
         
     def getImageShapes(self):
         imgArr = utils.img_data_to_arr(self.imageData)
