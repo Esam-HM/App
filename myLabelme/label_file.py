@@ -195,9 +195,16 @@ class LabelFile(object):
     @staticmethod
     def is_label_file(filename, suffixId):
         return osp.splitext(filename)[1].lower() == LabelFile.outputSuffixes[suffixId]
-        
+    
+    @staticmethod
+    def getSizes(image_path):
+        img = PIL.Image.open(image_path)
+        img = utils.apply_exif_orientation(img)
+        return img.size
+
     def getImageShapes(self):
         imgArr = utils.img_data_to_arr(self.imageData)
+
         return imgArr.shape[:2]
 
 ## Yolo Format Label file

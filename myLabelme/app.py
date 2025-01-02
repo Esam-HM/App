@@ -25,6 +25,7 @@ from .widgets import (BrightnessContrastDialog, Canvas,
                              LoadLabelFilesDialog, SaveDialog, SaveSettingDialog)
 from . import utils
 
+
 LABEL_COLORMAP = imgviz.label_colormap()
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -1061,12 +1062,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.filename = None
         self.fileListWidget.clear()
         self.resetApplicationState()
-        self.resetFileListWidget(load=False)
+        
 
         filenames = self.scanAllImages(dirpath)
         if not filenames:   ## FIXED
             return
-
+        
+        self.resetFileListWidget(load=False)
         ### Mark file item if already has label file
         self.addFilesToFileList(filenames)
 
@@ -1140,9 +1142,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # if saved, continue.
         if not self.mayContinue():
             return
-        
-        #self.fileListWidget.clear()
-        #self.buffer.clear()
 
         path = osp.dirname(str(self.filename)) if self.filename else "."
         ## only open labelme (*.json) files.
@@ -1162,6 +1161,11 @@ class MainWindow(QtWidgets.QMainWindow):
             filters,
         )
         if selectedFilePath:
+            if self.fileListWidget.count()>0:
+                self.fileListWidget.clear()
+                self.resetApplicationState()
+                self.actions.openNextImg.setEnabled(False)
+                self.actions.openPrevImg.setEnabled(False)
             self.loadFile(selectedFilePath)
 
     ## Closing opened file.
@@ -1199,7 +1203,7 @@ class MainWindow(QtWidgets.QMainWindow):
             item = self.fileListWidget.currentItem()
             item.setCheckState(Qt.Unchecked)
 
-            self.resetState()
+            #self.resetState()
 
     ## Set filename with the next file if found
     ## else, stay in the last one.
@@ -1284,7 +1288,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.setEnabled(False)
         for action in self.actions.onShapesPresent:
             action.setEnabled(False)
-        self.actions.undo.setEnabled(False)
 
         if filename is None:
             filename = self.settings.value("filename", "")
@@ -1331,7 +1334,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.buffer[filename] = {}
 
         if self.buffer[filename].get("shapes",None) is not None:
-            print("load from buffer")
+            #print("load from buffer")
             bufferedData = self.buffer[filename]
             self.loadShapes(bufferedData.get("shapes",[]))
             flags.update(bufferedData.get("flags",{}))
@@ -1350,7 +1353,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if self.loadShapesFromFile:
                 assert self.labelFilesDir or VideoLabelFile.labelFilePath, "label files directory not specified"
-                print("load from label file")
+                #print("load from label file")
                 self.lblFileLoaders.get(self.labelFileType)(filename,None)
 
             if self.labelFile:
@@ -1417,11 +1420,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status(str(self.tr("Loaded %s")) % osp.basename(str(filename)))
         return True
 
-    def loadAppJsonFile(self, filename:str, label_file:str, load=False):
-        ext = ".txt" if self.labelFileType==1 else ".json"
-        label_file = osp.splitext(filename)[0] + ext
-        label_file = osp.join(self.labelFilesDir,osp.basename(label_file))
-        if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file, self.labelFileType):
+    def loadAppJsonFile(self, filename:str, label_file:str=None, load:bool=False):
+        if label_file is None:
+            #ext = ".txt" if self.labelFileType==1 else ".json"
+            label_file = osp.splitext(filename)[0] + ".json"
+            label_file = osp.join(self.labelFilesDir,osp.basename(label_file))
+        if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file, 0):
             try:
                 self.labelFile = LabelFile(label_file)
             except LabelFileError as e:
@@ -1452,9 +1456,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
     def loadTxtLblFile(self, filename:str=None, label_file:str=None, loadAnnOnly=False):
-        ext = ".txt" if self.labelFileType==1 else ".json"
-        label_file = osp.splitext(self.imagePath)[0] + ext
-        label_file = osp.join(self.labelFilesDir,osp.basename(label_file))
+        if label_file is None:
+            #ext = ".txt" if self.labelFileType==1 else ".json"
+            label_file = osp.splitext(filename)[0] + ".txt"
+            label_file = osp.join(self.labelFilesDir,osp.basename(label_file))
 
         if osp.exists(label_file) and osp.splitext(label_file)[1]==".txt":
             self.labelFile = YoloLabelFile()
@@ -1491,9 +1496,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.labelFile = None
         else:
             self.labelFile = None
-
-    def getLblFileExtension(self, type:int):
-        return ".txt" if type==1 else ".json"
 
     ## Used when openning file from recent files menu.
     def loadRecent(self, filename):
@@ -1680,7 +1682,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setDirty()
 
     def pasteSelectedShape(self):
-        self.loadShapes(self._copied_shapes, replace=False)
+        shapes = [s.copy() for s in self._copied_shapes]
+        self.loadShapes(shapes, replace=False)
         self.setDirty()
 
     def copySelectedShape(self):
@@ -1739,10 +1742,11 @@ class MainWindow(QtWidgets.QMainWindow):
             shape.other_data = other_data
             s.append(shape)
 
-        if annsOnly and not self.noShapes():
-            self.replaceShapes(s)   ## When loading annotation file separately.
-        else:
-            self.loadShapes(s)
+        self.loadShapes(s)
+        # if annsOnly and not self.noShapes():
+        #     self.replaceShapes(s)   ## When loading annotation file separately.
+        # else:
+        #     self.loadShapes(s)
 
     ## Ask user to replace current shapes or not
     def replaceShapes(self, shapes):
@@ -1832,7 +1836,7 @@ class MainWindow(QtWidgets.QMainWindow):
     ###############   Flags    ###################
 
     def loadFlags(self, flags):
-        print("Flags")
+        #print("Flags")
         self.flag_widget.clear()
         for key, flag in flags.items():
             item = QtWidgets.QListWidgetItem(key)
@@ -1970,8 +1974,6 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.addFilesToFileList(filenames)
 
-
-
     ## triggered when selecting new file item
     ## to load it.
     def fileSelectionChanged(self):
@@ -1981,7 +1983,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fileListEditBtn.setEnabled(isEnable and not self.fileListEditMode)
 
         if not self.fileListEditMode:   ## Do not load image when editing file list.
-            print("File Selection Changed")
+            #print("File Selection Changed")
             items = self.fileListWidget.selectedItems()
             if not items:
                 return
@@ -2076,27 +2078,30 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ## Check for unsaved data. (when dirty is true)
     def mayContinue(self, singleFile=False):
-        print("May continue?")
-        if not self.filename:
-            return True
+        #print("May continue?")
+        # if not self.filename:
+        #     return True
 
         if not self.dirty and not self.allDirty:
             return True
+        
+        if not singleFile:
+            singleFile = self.fileListWidget.count()<=0
 
         if self.outputFileFormat is None or self.output_dir is None:
             defPath = osp.dirname(self.imagePath) if self.imagePath else "."
             dialog = SaveDialog(dirPath= defPath)
             if dialog.exec_() != QtWidgets.QDialog.Rejected:
 
-                if dialog.result == True:      ## save
+                if dialog.toSave == True:      ## save
                     self.outputFileFormat = dialog.selectedOption
                     self.output_dir = dialog.selectedDir
                     if singleFile:
-                        print("Save single file")
-                        #self.saveFile()
+                        #print("Save single file")
+                        self.saveFile()
                     else:
+                        #print("save all files")
                         self.saveAllOutputFiles()
-
                 else:       ## discard
                     self.dirty = False
                     self.allDirty = False
@@ -2108,8 +2113,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return False
             
         else:
-            print("setting already done")
-
+            #print("setting already done")
             mb = QtWidgets.QMessageBox
             msg = self.tr('Save all annotations to "{}" before closing?').format(self.output_dir)
             answer = mb.question(
@@ -2126,8 +2130,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 return True
             elif answer == mb.Save:
                 if singleFile:
-                    print("Saved single file")
-                    #self.saveLabels()
+                    #print("Saved single file")
+                    self.saveFile()
                 else:
                     self.saveAllOutputFiles()
                 return True
@@ -2146,7 +2150,7 @@ class MainWindow(QtWidgets.QMainWindow):
             label_file = osp.join(self.output_dir, osp.basename(label_file))
             self.bufferCurrentStatus()
             self.saveLabels(label_file, self.imagePath)
-            print("saved automatically.")
+            #print("saved automatically.")
             return
         self.dirty = True
         self.bufferCurrentStatus()
@@ -2155,6 +2159,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.filename is not None:
             title = "{} - {}*".format(title, self.filename)
         self.setWindowTitle(title)
+
+        if self.fileListWidget.count()>0:
+            self.fileListWidget.currentItem().setCheckState(Qt.Unchecked)
 
     def setClean(self):
         self.dirty = False
@@ -2217,6 +2224,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def getOutputFile(self):
         ext = LabelFile.outputSuffixes[self.outputFileFormat]
+        if self.output_file:
+            return self.output_file
         if self.output_dir:
             label_file = osp.splitext(self.filename)[0] + ext
             label_file = osp.join(self.output_dir, osp.basename(label_file))
@@ -2307,7 +2316,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ## Save window Geometry and status when app closed.
     def closeEvent(self, event):
-        if not self.mayContinue(self.fileListWidget.count()>0):
+        if not self.mayContinue():
             event.ignore()
         # self.settings.setValue("filename", self.filename if self.filename else "")
         # self.settings.setValue("window/size", self.size())
@@ -2341,6 +2350,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.outputFileFormat = dialog.selectedOption
             self.output_dir = dialog.selectedDir
             self.actions.saveAuto.setChecked(dialog.saveAuto)
+
             self.statusBar().showMessage(
                 self.tr("Annotations will be saved in '%s'")
                 % (self.output_dir)
@@ -2360,7 +2370,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def saveFile(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
-        print("saveFile")
+        #print("saveFile")
         if self.output_file:
             self._saveFile(self.output_file)
             self.close()
@@ -2370,7 +2380,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.setSaveSettings():
                 label_file = osp.splitext(self.imagePath)[0] + LabelFile.outputSuffixes[self.outputFileFormat]
                 label_file = osp.join(self.output_dir, osp.basename(label_file))
-                print(label_file)
+                #print(label_file)
                 self._saveFile(label_file)
         
         else:
@@ -2414,11 +2424,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if filename and self.saveLabels(filename, self.imagePath):
             self.setClean()
 
-    def saveLabels(self, filename:str, imgPath:str):
+    def saveLabels(self, filename:str, imgPath:str, showMessage:bool=True):
         '''
         Save labels to output file.
         '''
-        print("saveLabels")
+        #print("saveLabels")
         def format_shape(s):
             data = s.other_data.copy()
             data.update(
@@ -2434,9 +2444,12 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return data
         
-        shapes = [format_shape(shape) for shape in self.buffer[imgPath]["shapes"]]
-        flags = self.buffer[imgPath]["flags"]
-        imgSize = self.buffer[imgPath]["image_size"]
+        shapes = [format_shape(shape) for shape in self.buffer[imgPath].get("shapes")]
+        flags = self.buffer[imgPath].get("flags",{})
+        imgSize = self.buffer[imgPath].get("image_size")
+        if not imgSize:
+            imgSize = LabelFile.getSizes(imgPath)
+            self.buffer[imgPath]["image_size"] = imgSize
 
         if osp.dirname(filename) and not osp.exists(osp.dirname(filename)):
                     os.makedirs(osp.dirname(filename))
@@ -2480,9 +2493,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return True
             
         except LabelFileError as e:
-            self.errorMessage(
-                self.tr("Error saving label data"), self.tr("<b>%s</b>") % e
-            )
+            if showMessage:
+                self.errorMessage(
+                    self.tr("Error saving label data"), self.tr("<b>%s</b>") % e
+                )
             return False
         
     def isAllDirty(self):
@@ -2491,10 +2505,8 @@ class MainWindow(QtWidgets.QMainWindow):
         while not dirty and i<self.fileListWidget.count():
             image_path = self.fileListWidget.item(i).text()
             dirty = self.buffer[image_path].get("dirty",False)
-            print(i)
             i+=1
-            
-        
+
         return dirty
 
     def saveAllOutputFiles(self):
@@ -2505,16 +2517,48 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.outputFileFormat is None or not self.output_dir:
             if not self.setSaveSettings():
                 return
-            
-        for i in range(0,self.fileListWidget.count()):
-            image_path = self.fileListWidget.item(i)
-            if self.buffer.get("dirty", False):
-                self.saveLabels(image_path)
-            
+        
+        progress_dialog = QtWidgets.QProgressDialog("Please wait...", None, 0, 0, self)
+        progress_dialog.setWindowTitle("%s - Save Files" % __appname__)
+        progress_dialog.setCancelButton(None)  # Disable cancel button
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.setWindowFlags(Qt.WindowTitleHint)
+        progress_dialog.show()
+        #waitDialog = WaitDialog()
+        #waitDialog.show()
+        i=0
+        noErr = True
+        while noErr and i<self.fileListWidget.count():
+            image_path = self.fileListWidget.item(i).text()
+            #print(i)
+            if self.buffer[image_path].get("dirty", False):
+                #print("Saving")
+                labelFile = osp.splitext(image_path)[0] + LabelFile.outputSuffixes[self.outputFileFormat]
+                labelFile = osp.join(self.output_dir,osp.basename(labelFile))
+                if self.saveLabels(labelFile, image_path, False):
+                    self.fileListWidget.item(i).setCheckState(Qt.Checked)
+                else:
+                    noErr = False
+            i+=1
+
+        if not noErr:
+            progress_dialog.close()
+            self.errorMessage(
+                self.tr("Error saving label data"), self.tr("<b>%s</b>") % image_path
+            )
+            return
+
+        
+        self.allDirty = False
+        self.dirty = False
+        self.actions.save.setEnabled(False)
         self.actions.saveAll.setEnabled(False)
+        progress_dialog.close()
+
 
     def bufferCurrentStatus(self):
-        assert self.imagePath, "Can not Buffer Current Status."
+        assert self.imagePath, "Can not Buffer empty image."
         #if self.imagePath:
         # if self.imagePath not in self.buffer:
         #     self.buffer[self.imagePath] = {}
@@ -2797,23 +2841,41 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.loadFile(self.imagePath)
 
     def openAnnotationFile(self):
-        print("Not Available Now")
-        # dirpath = osp.dirname(self.imagePath) if self.imagePath else "."
-        # if self.output_dir:
-        #     dirpath = self.output_dir
-        # else:
-        #     if self.labelFilesDir:
-        #         dirpath = self.labelFilesDir
-        # ext = ".txt" if self.labelFileType==1 else ".json"
+        if self.dirty:
+            msg = QtWidgets.QMessageBox
+            answer =msg.question(
+                self, "%s Warning" % __appname__, 
+                "This process will override current annotations. Do you want to continue?",
+                msg.Yes | msg.Cancel,
+                msg.Yes,
+            )
+
+        #print("Not Available Now")
+            if answer == msg.Cancel:
+                return
+            
+            self.labelList.clear()
+        
+        dirpath = osp.dirname(self.imagePath) if self.imagePath else "."
+        filters = ";;".join(
+            [f"{fmt} Format (*{ext})" for fmt, ext in LabelFile.outputFormats.items()]
+        )
         # filters = self.tr("Label files (%s)") % " ".join(
         #     ["*%s" % ext]
         # )
-        # selectedFilePath, _ = QtWidgets.QFileDialog.getOpenFileName(
-        #     self,
-        #     self.tr("%s - Choose Label file") % __appname__,
-        #     dirpath,
-        #     filters,
-        # )
+        selectedFilePath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("%s - Choose Label file") % __appname__,
+            dirpath,
+            filters,
+        )
+        if not selectedFilePath:
+            return
+        self.labelList.clear()
+        if osp.splitext(selectedFilePath)[1] == ".txt":
+            self.lblFileLoaders.get(1)(None,selectedFilePath,True)
+        else:
+            self.lblFileLoaders.get(0)(None,selectedFilePath,True)
         # if selectedFilePath:
         #     self.lblFileLoaders.get(self.labelFileType)(None,selectedFilePath,True)
 
@@ -2842,7 +2904,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         #print(self.yoloModel.getCurrentImagePrediction(0))
-        self.loadLabels(res,True)
+        self.labelList.clear()
+        self.loadShapes(self.formatPredictedShapes(res))
 
         self._runYoloButton.setEnabled(True)
         #self.actions.editMode.setEnabled(True)
@@ -2875,18 +2938,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.yoloModel.resetPredictions()
 
         for i, image in enumerate(images):
+            
             progress.setValue(i)
-
             if not progress.wasCanceled():
                 self.yoloModel.runModelOnVideo(image)
                 anns = self.formatPredictedShapes(self.yoloModel.predictions[i])
-                # if images[i] not in self.buffer:
-                #     self.buffer[images[i]] = {"shapes": []}
                 self.buffer[image]["shapes"] = anns
                 self.buffer[image]["dirty"] = True
                 self.buffer[image]["undo"] = []
 
         #print(len(self.yoloModel.predictions))
+        self.labelList.clear()
         self.loadShapes(self.buffer[self.fileListWidget.currentItem().text()].get("shapes",[]))
         progress.setValue(self.fileListWidget.count())
 
@@ -2929,6 +2991,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.buffer[image]["dirty"] = True
                 self.buffer[image]["undo"] = []
 
+        self.labelList.clear()
         self.loadShapes(self.buffer[self.fileListWidget.currentItem().text()].get("shapes",[]))
         progress.setValue(self.fileListWidget.count())
 

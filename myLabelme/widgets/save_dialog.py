@@ -10,7 +10,7 @@ class SaveDialog(QDialog):
         self.selectedOption = selectedOption if selectedOption else 0
         self.selectedDir = dirPath
         self.selectedLegend = legendPath
-        self.result = None
+        self.toSave = None
         self.setWindowTitle("%s - Save Annotations" % __appname__)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(400,250)
@@ -151,13 +151,13 @@ class SaveDialog(QDialog):
         
         ## Save settings.
         self.selectedOption = self.comboBox.currentIndex()
-        self.result = True
+        self.toSave = True
         
         #print(self.selectedOption, self.selectedPath, self.selectedLegendFile)
         self.accept()
 
     def discardBtnClicked(self):
-        self.result = False
+        self.toSave = False
         self.accept()
 
 
