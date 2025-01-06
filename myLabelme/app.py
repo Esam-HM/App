@@ -2189,7 +2189,7 @@ class MainWindow(QtWidgets.QMainWindow):
         YoloLabelFile.outputLegend = []
         self.uniqLabelList.clear()
         self.uniqLabelList.labels = []
-        #self.labelDialog.deleteAllLabels()
+        self.labelDialog.deleteAllLabels()
 
     def toggleActions(self, value=True):
         '''Enable/Disable widgets which depend on an opened image.'''
@@ -2337,8 +2337,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if legend is not None:
                 YoloLabelFile.outputLegendPath = dialog.selectedLegend
                 YoloLabelFile.outputLegend = legend
-                #self.labelDialog.deleteAllLabels()
-                #self.labelDialog.addLabels(legend)
+                if self.labelDialog.labelList.count()>0:
+                    self.labelDialog.deleteAllLabels()
+                self.labelDialog.addLabels(legend)
 
             self.statusBar().showMessage(
                 self.tr("Annotations will be saved in '%s'")
@@ -2831,7 +2832,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if legend is not None:
                 YoloLabelFile.inputlegendPath = dialog.getSelectedLegend()
                 YoloLabelFile.legend = legend
-                #self.labelDialog.addLabels(YoloLabelFile.legend)
+                # if self.labelDialog.labelList.count()>0:
+                #     self.labelDialog.labelList.clear()
+                self.labelDialog.addLabels(YoloLabelFile.legend)
                 #self.addLabelsFromLegend(YoloLabelFile.legend)
             # if YoloLabelFile.loadLegendFile(dialog.getSelectedLegend()):
             #     self.labelDialog.addLabels(YoloLabelFile.legend)
