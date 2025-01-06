@@ -1,15 +1,17 @@
-from qtpy import QtWidgets
+from qtpy.QtWidgets import QFileDialog, QDialog, QLabel, QCheckBox, QComboBox, QLineEdit, QVBoxLayout, QWidget, QHBoxLayout, QDialogButtonBox, QPushButton
 from qtpy.QtCore import Qt, QTimer
+from qtpy.QtGui import QPixmap
 from .. import __appname__
 from os import path as osp
 
 
-class LoadLabelFilesDialog(QtWidgets.QDialog):
+class LoadLabelFilesDialog(QDialog):
     def __init__(self,selectedOption:int=0, dirPath:str=None, videoLblPath:str=None):
         super().__init__()
         self.selectedOption = selectedOption
         self.selectedPath = dirPath
         self.selectedLegendFile = None
+        self.setWindowTitle("%s - Load Label Files" % __appname__)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(400,200)
         self.initUI(videoLblPath)
@@ -18,27 +20,23 @@ class LoadLabelFilesDialog(QtWidgets.QDialog):
     def initUI(self, videoLblPath):
         options = ["Default labelme app format (.json)", "YOLO format (.txt)", "Label studio video format (.json)"]
         
-        # infoLbl = QtWidgets.QLabel(self)
-        # infoLbl.setText(
-        #     '<p align="justify"> <strong>Info:</strong> Choose your label files format and directory of your images to load annotations when opening image/s.</p>'
-        # )
-        infoLbl = QtWidgets.QLabel(
-            '''<p align="justify">
-            <strong>Info:</strong> Choose your label files format and directory of your images to load annotations when opening image/s.<br>
-            If YOLO format is your choice, include your txt legend file where each class is in a separate line.<br>
-            Example File:
-            <br>class1
-            <br>class2
-            <br>class3
-            </p>'''
+        infoLbl = QLabel(
+            '<p align="justify"><strong>Info:</strong>Choose your label files format and directory to load annotations.</p>'
         )
+
         infoLbl.setStyleSheet("color: #00f;")
         infoLbl.setWordWrap(True)
+        # image = QtWidgets.QLabel()
+        # icons_dir = osp.join(osp.dirname(osp.abspath(__file__)), "../icons")
+        # pixmap = QPixmap(osp.join(icons_dir,"legend_format.png"))
+        # pixmap = pixmap.scaled(150,150,Qt.KeepAspectRatio)
+        # image.setPixmap(pixmap)
+        # image.setAlignment(Qt.AlignCenter)
 
         ## Label file format selection
-        layout1 = QtWidgets.QVBoxLayout()
-        lbl1 = QtWidgets.QLabel("Select Label File Format:")
-        self.comboBox = QtWidgets.QComboBox()
+        layout1 = QVBoxLayout()
+        lbl1 = QLabel("Select Label File Format:")
+        self.comboBox = QComboBox()
         self.comboBox.addItems(options)
         self.comboBox.setCurrentIndex(self.selectedOption)
         layout1.addWidget(lbl1)
@@ -47,16 +45,16 @@ class LoadLabelFilesDialog(QtWidgets.QDialog):
         layout1.setContentsMargins(margins.left(), 10, margins.right(), 25)
 
         ## Label files directory selection
-        self.widget2 = QtWidgets.QWidget()
-        layout2 = QtWidgets.QVBoxLayout()
-        lbl2 = QtWidgets.QLabel("Select Label Files Directory:")
-        hLayout2 = QtWidgets.QHBoxLayout()
-        self.dirpathEditTxt = QtWidgets.QLineEdit()
+        self.widget2 = QWidget()
+        layout2 = QVBoxLayout()
+        lbl2 = QLabel("Select Label Files Directory:")
+        hLayout2 = QHBoxLayout()
+        self.dirpathEditTxt = QLineEdit()
         self.dirpathEditTxt.setPlaceholderText("*Your Label Files Directory Path")
         if self.selectedPath:
             self.dirpathEditTxt.setText(self.selectedPath)
-        browseDirBtn = QtWidgets.QPushButton("Browse")
-        self.dirPathErrorLbl = QtWidgets.QLabel()
+        browseDirBtn = QPushButton("Browse")
+        self.dirPathErrorLbl = QLabel()
         self.dirPathErrorLbl.setStyleSheet("color: #f00;")
         self.dirPathErrorLbl.setContentsMargins(0,0,0,0)
         self.dirPathErrorLbl.setVisible(False)
@@ -70,16 +68,16 @@ class LoadLabelFilesDialog(QtWidgets.QDialog):
         self.widget2.setLayout(layout2)
 
         ## Video Label file selection.
-        self.widget3 = QtWidgets.QWidget()
-        layout3 = QtWidgets.QVBoxLayout()
-        lbl3 = QtWidgets.QLabel("Select Video Label File:")
-        hLayout3 = QtWidgets.QHBoxLayout()
-        self.videoPathEditTxt = QtWidgets.QLineEdit()
+        self.widget3 = QWidget()
+        layout3 = QVBoxLayout()
+        lbl3 = QLabel("Select Video Label File:")
+        hLayout3 = QHBoxLayout()
+        self.videoPathEditTxt = QLineEdit()
         self.videoPathEditTxt.setPlaceholderText("*Your Label File Path")
         if videoLblPath:
             self.videoPathEditTxt.setText(videoLblPath)
-        browseVideoBtn = QtWidgets.QPushButton("Browse")
-        self.videoPathErrorLbl = QtWidgets.QLabel()
+        browseVideoBtn = QPushButton("Browse")
+        self.videoPathErrorLbl = QLabel()
         self.videoPathErrorLbl.setStyleSheet("color: #f00;")
         self.videoPathErrorLbl.setContentsMargins(0,0,0,0)
         self.videoPathErrorLbl.setVisible(False)
@@ -93,35 +91,38 @@ class LoadLabelFilesDialog(QtWidgets.QDialog):
         self.widget3.setLayout(layout3)
 
         ## Legend file selection.
-        self.widget4 = QtWidgets.QWidget()
-        layout4 = QtWidgets.QVBoxLayout()
-        lbl4 = QtWidgets.QLabel("Select Labels Legend File (*.txt):")
-        hLayout4 = QtWidgets.QHBoxLayout()
-        self.legendPathEditTxt = QtWidgets.QLineEdit()
+        self.widget4 = QWidget()
+        layout4 = QVBoxLayout()
+        lbl4 = QLabel("Select Labels Legend File (*.txt):")
+        hLayout4 = QHBoxLayout()
+        self.legendPathEditTxt = QLineEdit()
         self.legendPathEditTxt.setPlaceholderText("Your Legend File Path (*Optional)")
-        browseLegendBtn = QtWidgets.QPushButton("Browse")
-        self.legendPathErrorLbl = QtWidgets.QLabel()
+        browseLegendBtn = QPushButton("Browse")
+        self.legendPathErrorLbl = QLabel()
         self.legendPathErrorLbl.setStyleSheet("color: #f00;")
         self.legendPathErrorLbl.setContentsMargins(0,0,0,0)
         self.legendPathErrorLbl.setVisible(False)
+        notLbl = QLabel("<strong>Not:</strong> Classes must be in seperated lines.")
         hLayout4.addWidget(self.legendPathEditTxt)
         hLayout4.addWidget(browseLegendBtn)
         hLayout4.setContentsMargins(0,0,0,0)
         layout4.addWidget(lbl4)
         layout4.addLayout(hLayout4)
         layout4.addWidget(self.legendPathErrorLbl)
+        layout4.addWidget(notLbl)
         layout4.setContentsMargins(margins.left(),margins.top(),margins.right(),10)
         self.widget4.setLayout(layout4)
 
         ## Buttons
-        layout5 = QtWidgets.QHBoxLayout()
-        self.loadBtn = QtWidgets.QPushButton("Load")
-        cancelBtn = QtWidgets.QPushButton("Cancel")
+        layout5 = QHBoxLayout()
+        self.loadBtn = QPushButton("Load")
+        cancelBtn = QPushButton("Cancel")
         layout5.addWidget(self.loadBtn)
         layout5.addWidget(cancelBtn)
 
-        mainLayout = QtWidgets.QVBoxLayout()
+        mainLayout = QVBoxLayout()
         mainLayout.addWidget(infoLbl)
+        #mainLayout.addWidget(image)
         mainLayout.addLayout(layout1)
         mainLayout.addWidget(self.widget2)
         mainLayout.addWidget(self.widget3)
@@ -191,12 +192,12 @@ class LoadLabelFilesDialog(QtWidgets.QDialog):
     def selectLabelFilesDir(self):
         defaultDirPath = self.selectedPath if self.selectedPath else "."
         targetPath = str(
-            QtWidgets.QFileDialog.getExistingDirectory(
+            QFileDialog.getExistingDirectory(
                 self,
                 self.tr("%s - Select Directory") % __appname__,
                 defaultDirPath,
-                QtWidgets.QFileDialog.ShowDirsOnly
-                | QtWidgets.QFileDialog.DontResolveSymlinks,
+                QFileDialog.ShowDirsOnly
+                | QFileDialog.DontResolveSymlinks,
             )
         )
         if targetPath:
@@ -211,7 +212,7 @@ class LoadLabelFilesDialog(QtWidgets.QDialog):
             else:
                 defaultDirPath="."
 
-        targetPath,_ = QtWidgets.QFileDialog.getOpenFileName(
+        targetPath,_ = QFileDialog.getOpenFileName(
             self,
             self.tr("%s - Choose Label file") % __appname__,
             defaultDirPath,
@@ -225,7 +226,7 @@ class LoadLabelFilesDialog(QtWidgets.QDialog):
         defaultDir = self.dirpathEditTxt.text() if self.dirpathEditTxt.text() else self.selectedPath
         defaultDir = defaultDir if defaultDir else "."
 
-        selectedFilePath, _ = QtWidgets.QFileDialog.getOpenFileName(
+        selectedFilePath, _ = QFileDialog.getOpenFileName(
             self,
             self.tr("%s - Select Legend File") % __appname__,
             defaultDir,

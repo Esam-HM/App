@@ -14,7 +14,7 @@ class SaveDialog(QDialog):
         self.setWindowTitle("%s - Save Annotations" % __appname__)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(400,250)
-        self.setMaximumSize(800,500)
+        self.setMaximumSize(800,600)
         self.initUI()
         self.adjustSize()
 
@@ -25,20 +25,17 @@ class SaveDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-weight: bold; font-size: 10pt;")
 
-
-        # infoLbl = QtWidgets.QLabel(
-        #     '''<p align="justify">
-        #     <strong>Info:</strong> Choose your output label files format and the output directory where to save them.</p>'''
-        # )
-        # infoLbl.setStyleSheet("color: #00f;")
-        # infoLbl.setWordWrap(True)
-
         ## Save format.
+        layout1 = QVBoxLayout()
         lbl1 = QLabel()
         lbl1.setText("Select a format to save your label files:")
         self.comboBox = QComboBox()
         self.comboBox.addItems(options)
         self.comboBox.setCurrentIndex(self.selectedOption)
+        layout1.addWidget(lbl1)
+        layout1.addWidget(self.comboBox)
+        margins = layout1.contentsMargins()
+        layout1.setContentsMargins(margins.left(), 10, margins.right(), 10)
 
         ## output directory selection
         widget2 = QWidget()
@@ -60,32 +57,33 @@ class SaveDialog(QDialog):
         layout2.addWidget(lbl2)
         layout2.addLayout(hLayout2)
         layout2.addWidget(self.dirPathErrorLbl)
-        margins = layout2.contentsMargins()
-        layout2.setContentsMargins(margins.left(),margins.top(),margins.right(),25)
+        layout2.setContentsMargins(margins.left(),margins.top(),margins.right(),10)
         widget2.setLayout(layout2)
 
-        # self.widget3 = QWidget()
-        # layout3 = QVBoxLayout()
-        # lbl3 = QLabel("Select Your Legend File (*.txt):")
-        # hLayout3 = QHBoxLayout()
-        # self.legendPathEditTxt = QLineEdit()
-        # self.legendPathEditTxt.setPlaceholderText("*Your Legend File Path")
-        # if self.selectedLegend:
-        #     self.legendPathEditTxt.setText(self.selectedLegend)
-        # browseLegendBtn = QPushButton("Browse")
-        # self.legendPathErrorLbl = QLabel()
-        # self.legendPathErrorLbl.setStyleSheet("color: #f00;")
-        # self.legendPathErrorLbl.setContentsMargins(0,0,0,0)
-        # self.legendPathErrorLbl.setVisible(False)
-        # hLayout3.addWidget(self.legendPathEditTxt)
-        # hLayout3.addWidget(browseLegendBtn)
-        # hLayout3.setContentsMargins(0,0,0,0)
-        # layout3.addWidget(lbl3)
-        # layout3.addLayout(hLayout3)
-        # layout3.addWidget(self.legendPathErrorLbl)
-        # layout3.setContentsMargins(margins.left(),margins.top(),margins.right(),25)
-        # self.widget3.setLayout(layout2)
-        # self.widget3.setVisible(False)
+        self.widget3 = QWidget()
+        layout3 = QVBoxLayout()
+        lbl3 = QLabel("Select Your Legend File (*.txt):")
+        hLayout3 = QHBoxLayout()
+        self.legendPathEditTxt = QLineEdit()
+        self.legendPathEditTxt.setPlaceholderText("*Your Legend File Path")
+        if self.selectedLegend:
+            self.legendPathEditTxt.setText(self.selectedLegend)
+        browseLegendBtn = QPushButton("Browse")
+        self.legendPathErrorLbl = QLabel()
+        self.legendPathErrorLbl.setStyleSheet("color: #f00;")
+        self.legendPathErrorLbl.setContentsMargins(0,0,0,0)
+        self.legendPathErrorLbl.setVisible(False)
+        notLbl = QLabel("<strong>Not:</strong> Classes must be in seperated lines.")
+        hLayout3.addWidget(self.legendPathEditTxt)
+        hLayout3.addWidget(browseLegendBtn)
+        hLayout3.setContentsMargins(0,0,0,0)
+        layout3.addWidget(lbl3)
+        layout3.addLayout(hLayout3)
+        layout3.addWidget(self.legendPathErrorLbl)
+        layout3.addWidget(notLbl)
+        layout3.setContentsMargins(margins.left(),margins.top(),margins.right(),10)
+        self.widget3.setLayout(layout3)
+        self.widget3.setVisible(False)
 
         btnsLayout = QHBoxLayout()
         self.saveBtn = QPushButton("Save")
@@ -99,13 +97,11 @@ class SaveDialog(QDialog):
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(title)
         mainLayout.addStretch()
-        #mainLayout.addWidget(infoLbl)
-        mainLayout.addWidget(lbl1)
-        mainLayout.addWidget(self.comboBox)
+        mainLayout.addLayout(layout1)
         mainLayout.addStretch()
         mainLayout.addWidget(lbl2)
         mainLayout.addWidget(widget2)
-        #mainLayout.addWidget(self.widget3)
+        mainLayout.addWidget(self.widget3)
         mainLayout.addLayout(btnsLayout)
         self.setLayout(mainLayout)
 
@@ -114,10 +110,11 @@ class SaveDialog(QDialog):
         discardBtn.clicked.connect(self.discardBtnClicked)
         cancelBtn.clicked.connect(self.reject)
         browseDirBtn.clicked.connect(self.selectOutputDir)
-        #browseLegendBtn.clicked.connect(self.selectLegendFile)
-        self.dirpathEditTxt.textChanged.connect(self.isDirPathEmpty)
-        #self.legendPathEditTxt.textChanged.connect(self.isFieldsEmpty)
-        #self.comboBox.currentIndexChanged.connect(self.formatSelectionChanged)
+        browseLegendBtn.clicked.connect(self.selectLegendFile)
+        #self.dirpathEditTxt.textChanged.connect(self.isDirPathEmpty)
+        self.dirpathEditTxt.textChanged.connect(self.isFieldsEmpty)
+        self.legendPathEditTxt.textChanged.connect(self.isFieldsEmpty)
+        self.comboBox.currentIndexChanged.connect(self.formatSelectionChanged)
 
     def getCurrentOption(self):
         return self.selectedOption
@@ -125,8 +122,8 @@ class SaveDialog(QDialog):
     def getSelectedDir(self):
         return self.selectedDir
     
-    # def getSelectedLegend(self):
-    #     return self.selectedLegend
+    def getSelectedLegend(self):
+        return self.selectedLegend
 
 
     def saveBtnClicked(self):
@@ -137,17 +134,17 @@ class SaveDialog(QDialog):
         
         self.selectedDir = path
 
-        # if self.widget3.isVisible():
-        #     path = self.legendPathEditTxt.text()
-        #     if not osp.exists(path):
-        #         self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Invalid Path")
-        #         return
+        if self.widget3.isVisible():
+            path = self.legendPathEditTxt.text()
+            if not osp.exists(path):
+                self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Invalid Path")
+                return
             
-        #     if not osp.splitext(path)[1].lower() !=".txt":
-        #         self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Only (.txt) file accepted.")
-        #         return
+            if osp.splitext(path)[1].lower() !=".txt":
+                self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Only (.txt) file accepted.")
+                return
             
-        #     self.selectedLegend = path
+            self.selectedLegend = path
         
         ## Save settings.
         self.selectedOption = self.comboBox.currentIndex()
@@ -175,29 +172,30 @@ class SaveDialog(QDialog):
         if targetPath:
             self.dirpathEditTxt.setText(targetPath)
 
-    # def selectLegendFile(self):
-    #     defaultDir = self.legendPathEditTxt.text() if self.legendPathEditTxt.text() else "."
+    def selectLegendFile(self):
+        defaultDir = self.legendPathEditTxt.text() if self.legendPathEditTxt.text() else "."
 
-    #     selectedFilePath, _ = QtWidgets.QFileDialog.getOpenFileName(
-    #         self,
-    #         self.tr("%s - Select Legend File") % __appname__,
-    #         defaultDir,
-    #         self.tr("File (*.txt)"),
-    #     )
+        selectedFilePath, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("%s - Select Legend File") % __appname__,
+            defaultDir,
+            self.tr("File (*.txt)"),
+        )
 
-    #     if selectedFilePath:
-    #         self.legendPathEditTxt.setText(selectedFilePath)
+        if selectedFilePath:
+            self.legendPathEditTxt.setText(selectedFilePath)
 
-    # def formatSelectionChanged(self):
-    #     self.widget3.setVisible(self.comboBox.currentIndex==1)
-    #     self.isFieldsEmpty()
+    def formatSelectionChanged(self):
+        self.widget3.setVisible(self.comboBox.currentIndex()==1)
+        self.adjustSize()
+        self.isFieldsEmpty()
 
 
-    # def isFieldsEmpty(self):
-    #     if self.widget3.isVisible():
-    #         self.saveBtn.setEnabled(self.legendPathEditTxt.text()!="" and self.dirpathEditTxt.text!="")
-    #     else:
-    #         self.saveBtn.setEnabled(self.dirpathEditTxt.text!="")
+    def isFieldsEmpty(self):
+        if self.widget3.isVisible():
+            self.saveBtn.setEnabled(self.legendPathEditTxt.text()!="" and self.dirpathEditTxt.text!="")
+        else:
+            self.saveBtn.setEnabled(self.dirpathEditTxt.text!="")
 
     def isDirPathEmpty(self):
         self.saveBtn.setEnabled(not self.dirpathEditTxt.text()=="")
@@ -218,4 +216,5 @@ class SaveDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.isDirPathEmpty()
+        self.isFieldsEmpty()
+        # self.isDirPathEmpty()

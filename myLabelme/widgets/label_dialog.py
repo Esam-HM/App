@@ -247,3 +247,6 @@ class LabelDialog(QtWidgets.QDialog):
     def addLabels(self, labels:list):
         self.labelList.addItems(labels)
 
+    def deleteAllLabels(self):
+        self.labelList.clear()
+

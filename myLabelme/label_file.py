@@ -210,48 +210,27 @@ class LabelFile(object):
 ## Yolo Format Label file
 class YoloLabelFile(LabelFile):
     #LabelFile.suffix = ".txt"
+    inputlegendPath = None
+    outputLegendPath = None
+    outputLegend = []
     legend = []
     def __init__(self):
         super().__init__(None)
 
-    def loadTxtFileData(self, filename):
+    def load(self, filename:str):
         with open(filename, "r") as f:
             lines = f.readlines()
-        pp = {}
-        
+
         for line in lines:
             data = line.strip().split()
-            if data and len(data)==5:
-                try:
-                    classID = int(data[0])
-                    x_center = float(data[1])*self.imageWidth
-                    y_center = float(data[2])*self.imageHeight
-                    box_width = float(data[3])*self.imageWidth
-                    box_height = float(data[4])*self.imageHeight
-                except ValueError:
-                    logger.error("Error reading %s file" % filename)
-                    return {}
-                 
-                x1 = int(x_center-box_width/2)
-                y1 = int(y_center-box_height/2)
-                x2 = int(x_center+box_width/2)
-                y2 = int(y_center+box_height/2)
+            if data:
+                pp = self.formatYoloData(data)
+                if pp is None:
+                    raise LabelFileError("Not valid yolo label file")
                 
-                if pp.get(classID) is None:
-                    pp[classID] = []
-                pp[classID].append([(x1,y1),(x2,y2)])
-        
-        return pp
-    
-
-    def loadTxtFile(self, filename:str):
-        data = self.loadTxtFileData(filename)
-        ## convert to application format
-        for key, values in data.items():
-            for value in values:
                 shape = {}
                 shape["group_id"] = None
-                shape["label"] = YoloLabelFile.legend[key] if len(YoloLabelFile.legend)> key else str(key)
+                shape["label"] = YoloLabelFile.legend[pp[0]] if len(YoloLabelFile.legend)> pp[0] else str(pp[0])
                 shape["description"] = None
                 shape["shape_type"] = "rectangle"
                 shape["flags"] = {}
@@ -259,18 +238,94 @@ class YoloLabelFile(LabelFile):
                 shape["points"] = []
                 shape["other_data"] = {}
 
-                for x,y in value:
+                for x,y in pp[1]:
                     shape["points"].append([x,y])
-                
+
                 self.shapes.append(shape)
 
         self.filename = filename
-        self.flags = None
+        self.flags = None    
+
+
+    def formatYoloData(self, data:list):
+        if len(data)!=5:
+            return
+
+        try:
+            classID = int(data[0])
+            x_center = float(data[1])*self.imageWidth
+            y_center = float(data[2])*self.imageHeight
+            box_width = float(data[3])*self.imageWidth
+            box_height = float(data[4])*self.imageHeight
+        except ValueError:
+            return
+                 
+        x1 = int(x_center-box_width/2)
+        y1 = int(y_center-box_height/2)
+        x2 = int(x_center+box_width/2)
+        y2 = int(y_center+box_height/2)
+
+        return classID, [(x1,y1),(x2,y2)]
+
+
+
+    # def loadTxtFileData(self, filename):
+    #     with open(filename, "r") as f:
+    #         lines = f.readlines()
+    #     pp = {}
+        
+    #     for line in lines:
+    #         data = line.strip().split()
+    #         if data and len(data)==5:
+    #             try:
+    #                 classID = int(data[0])
+    #                 x_center = float(data[1])*self.imageWidth
+    #                 y_center = float(data[2])*self.imageHeight
+    #                 box_width = float(data[3])*self.imageWidth
+    #                 box_height = float(data[4])*self.imageHeight
+    #             except ValueError:
+    #                 logger.error("Error reading %s file" % filename)
+    #                 return {}
+                 
+    #             x1 = int(x_center-box_width/2)
+    #             y1 = int(y_center-box_height/2)
+    #             x2 = int(x_center+box_width/2)
+    #             y2 = int(y_center+box_height/2)
+                
+    #             if pp.get(classID) is None:
+    #                 pp[classID] = []
+    #             pp[classID].append([(x1,y1),(x2,y2)])
+        
+    #     return pp
+    
+
+    # def loadTxtFile(self, filename:str):
+    #     data = self.loadTxtFileData(filename)
+    #     ## convert to application format
+    #     for key, values in data.items():
+    #         for value in values:
+    #             shape = {}
+    #             shape["group_id"] = None
+    #             shape["label"] = YoloLabelFile.legend[key] if len(YoloLabelFile.legend)> key else str(key)
+    #             shape["description"] = None
+    #             shape["shape_type"] = "rectangle"
+    #             shape["flags"] = {}
+    #             shape["mask"] = None
+    #             shape["points"] = []
+    #             shape["other_data"] = {}
+
+    #             for x,y in value:
+    #                 shape["points"].append([x,y])
+                
+    #             self.shapes.append(shape)
+
+    #     self.filename = filename
+    #     self.flags = None
 
     @staticmethod
     def loadLegendFile(filepath:str=None):
         if not filepath:
-            return False
+            return
         try:
             legend = []
             with open(filepath, "r") as f:
@@ -278,16 +333,15 @@ class YoloLabelFile(LabelFile):
             for line in lines:
                 legend.append(line.strip())
 
-            YoloLabelFile.legend = legend
-            return True
+            return legend
         except Exception as e:
             logger.error(
                 "Error reading legend file."
             )
-            return False
+            return
     
     ## Override
-    def save(self,filename, shapes, imageSize):
+    def save(self,filename, shapes, imageSize, classList):
         ## class id, group id, x_center, y_center, box width, box height,
         # shape_keys = [
         #     "label",
@@ -317,7 +371,22 @@ class YoloLabelFile(LabelFile):
                 width = str(width/imageSize[0])
                 height = str(height/imageSize[1])
 
-                lines.append(f"{shape["label"]} {x_center} {y_center} {width} {height}\n")
+                i=0
+                classId = None
+                while i<len(classList):
+                    if classList[i].lower() == shape["label"].lower():
+                        classId = str(i)
+                    i+=1
+
+                if classId is None:
+                    classId = shape["label"]
+
+                # try:
+                #     classId = str(YoloLabelFile.outputLegend.index(shape["label"]))
+                # except Exception:
+                #     classId = shape["label"]
+
+                lines.append(f"{classId} {x_center} {y_center} {width} {height}\n")
 
         try:
             with open(filename, "w") as f:
