@@ -75,6 +75,7 @@ canvas:
   crosshair:
     polygon: false
     rectangle: true
+    box: false
     circle: false
     line: false
     point: false

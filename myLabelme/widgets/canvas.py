@@ -51,6 +51,7 @@ class Canvas(QtWidgets.QWidget):
             {
                 "polygon": False,
                 "rectangle": True,
+                "box": False,
                 "circle": False,
                 "line": False,
                 "point": False,
@@ -101,6 +102,8 @@ class Canvas(QtWidgets.QWidget):
         self.setFocusPolicy(QtCore.Qt.WheelFocus)
 
         self._ai_model = None
+        self.fixedRectWidth = None
+        self.fixedRectHeight = None
 
     def fillDrawing(self):
         return self._fill_drawing
@@ -117,6 +120,7 @@ class Canvas(QtWidgets.QWidget):
         if value not in [
             "polygon",
             "rectangle",
+            "box",
             "circle",
             "line",
             "point",
@@ -243,6 +247,8 @@ class Canvas(QtWidgets.QWidget):
         if self.drawing():
             if self.createMode in ["ai_polygon", "ai_mask"]:
                 self.line.shape_type = "points"
+            elif self.createMode == "box":
+                self.line.shape_type = "rectangle"
             else:
                 self.line.shape_type = self.createMode
 
@@ -279,6 +285,9 @@ class Canvas(QtWidgets.QWidget):
                 self.line.points = [self.current[0], pos]
                 self.line.point_labels = [1, 1]
                 self.line.close()
+            elif self.createMode == "box":
+                ## Do no thing
+                print(f"mouse move event")
             elif self.createMode == "circle":
                 self.line.points = [self.current[0], pos]
                 self.line.point_labels = [1, 1]
@@ -435,11 +444,23 @@ class Canvas(QtWidgets.QWidget):
                             self.finalise()
                 elif not self.outOfPixmap(pos):
                     # Create new shape.
+                    shape_type = None
+                    if self.createMode in ["ai_polygon", "ai_mask"]:
+                        shape_type = "points"
+                    elif self.createMode == "box":
+                        shape_type = "rectangle"
+                    else:
+                        shape_type = self.createMode
                     self.current = Shape(
-                        shape_type="points"
-                        if self.createMode in ["ai_polygon", "ai_mask"]
-                        else self.createMode
+                        shape_type= shape_type
                     )
+                    if self.createMode == "box":
+                        top_left = QtCore.QPointF(pos.x() - self.fixedRectWidth / 2, pos.y() - self.fixedRectHeight / 2)
+                        bottom_right = QtCore.QPointF(pos.x() + self.fixedRectWidth / 2, pos.y() + self.fixedRectHeight / 2)
+                        if not self.outOfPixmap(top_left) and not self.outOfPixmap(bottom_right):
+                            self.current.points = [top_left, bottom_right]
+                            self.finalise()
+                        return
                     self.current.addPoint(pos, label=0 if is_shift_pressed else 1)
                     if self.createMode == "point":
                         self.finalise()
@@ -486,6 +507,7 @@ class Canvas(QtWidgets.QWidget):
             self.prevPoint = pos
 
     def mouseReleaseEvent(self, ev):
+        print("mouseReleaseEvent")
         if ev.button() == QtCore.Qt.RightButton:
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
@@ -680,6 +702,7 @@ class Canvas(QtWidgets.QWidget):
             self.boundedMoveShapes(shapes, point + offset)
 
     def paintEvent(self, event):
+        print("paint event")
         if not self.pixmap:
             return super(Canvas, self).paintEvent(event)
 
@@ -803,6 +826,7 @@ class Canvas(QtWidgets.QWidget):
         return not (0 <= p.x() <= w - 1 and 0 <= p.y() <= h - 1)
 
     def finalise(self):
+        print("finalize")
         assert self.current
         if self.createMode == "ai_polygon":
             # convert points to polygon by an AI model
@@ -836,7 +860,9 @@ class Canvas(QtWidgets.QWidget):
         self.storeShapes()
         self.current = None
         self.setHiding(False)
+        print("emit new shape")
         self.newShape.emit()
+        print("previous update")
         self.update()
 
     def closeEnough(self, p1, p2):
@@ -947,13 +973,23 @@ class Canvas(QtWidgets.QWidget):
             self.movingShape = True
 
     def keyPressEvent(self, ev):
+        print("key press event")
         modifiers = ev.modifiers()
         key = ev.key()
         if self.drawing():
-            if key == QtCore.Qt.Key_Escape and self.current:
-                self.current = None
-                self.drawingPolygon.emit(False)
-                self.update()
+            # if key == QtCore.Qt.Key_Escape and self.current:
+            #     self.current = None
+            #     self.drawingPolygon.emit(False)
+            #     self.update()
+            if key == QtCore.Qt.Key_Escape:
+                if self.current:
+                    self.current = None
+                    self.drawingPolygon.emit(False)
+                    self.update()
+                else:
+                    if not self.current and self.createMode in ["point", "box"]:
+                        self.drawingPolygon.emit(False)
+                        self.update()
             elif key == QtCore.Qt.Key_Return and self.canCloseShape():
                 self.finalise()
             elif modifiers == QtCore.Qt.AltModifier:
@@ -969,6 +1005,7 @@ class Canvas(QtWidgets.QWidget):
                 self.moveByKeyboard(QtCore.QPointF(MOVE_SPEED, 0.0))
 
     def keyReleaseEvent(self, ev):
+        print("key release event")
         modifiers = ev.modifiers()
         if self.drawing():
             if int(modifiers) == 0:
@@ -999,7 +1036,7 @@ class Canvas(QtWidgets.QWidget):
             self.line.points = [self.current[-1], self.current[0]]
         elif self.createMode in ["rectangle", "line", "circle"]:
             self.current.points = self.current.points[0:1]
-        elif self.createMode == "point":
+        elif self.createMode in ["point", "box"]:
             self.current = None
         self.drawingPolygon.emit(True)
 

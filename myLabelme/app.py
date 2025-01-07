@@ -22,7 +22,8 @@ from .widgets import (BrightnessContrastDialog, Canvas,
                              LabelDialog, LabelListWidget, LabelListWidgetItem, ToolBar,
                              UniqueLabelQListWidget,
                              ZoomWidget, ExtractFramesDialog,
-                             LoadLabelFilesDialog, SaveDialog, SaveSettingDialog)
+                             LoadLabelFilesDialog, SaveDialog, SaveSettingDialog,
+                             BoxSettingsDialog,)
 from . import utils
 
 
@@ -450,6 +451,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Start drawing rectangles"),
             enabled=False,
         )
+        createBoxMode = action(
+            self.tr("Create Box"),
+            lambda: self.toggleDrawMode(False, createMode="box"),
+            None,
+            "objects",
+            self.tr("Start drawing fixed rectangles"),
+            enabled=False,
+        )
         createCircleMode = action(
             self.tr("Create Circle"),
             lambda: self.toggleDrawMode(False, createMode="circle"),
@@ -729,7 +738,13 @@ class MainWindow(QtWidgets.QMainWindow):
             "Adjust brightness and contrast",
             enabled=False,
         )
-
+        setBoxSize = action(
+            self.tr("&Set Box Size"),
+            self.setBoxSize,
+            None,
+            "edit_icon",
+            self.tr("Set or change box width and height."),
+        )
         ## XXX
         fillGapVideo = action(
             self.tr("&Fill Video Gaps"),
@@ -780,6 +795,7 @@ class MainWindow(QtWidgets.QMainWindow):
             createMode=createMode,
             editMode=editMode,
             createRectangleMode=createRectangleMode,
+            createBoxMode = createBoxMode,
             createCircleMode=createCircleMode,
             createLineMode=createLineMode,
             createPointMode=createPointMode,
@@ -821,12 +837,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 None,
                 removePoint,
                 None,
+                setBoxSize,
                 toggle_keep_prev_mode,
             ),
             # menu shown at right click
             menu=(
                 createMode,
                 createRectangleMode,
+                createBoxMode,
                 createCircleMode,
                 createLineMode,
                 createPointMode,
@@ -848,6 +866,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 close,
                 createMode,
                 createRectangleMode,
+                createBoxMode,
                 createCircleMode,
                 createLineMode,
                 createPointMode,
@@ -877,6 +896,7 @@ class MainWindow(QtWidgets.QMainWindow):
             deleteFile,
             None,
             createRectangleMode,
+            createBoxMode,
             editMode,
             delete,
             deleteAll,
@@ -2595,6 +2615,7 @@ class MainWindow(QtWidgets.QMainWindow):
         flags = {}
         group_id = None
         description = ""
+        print("new shape")
         if self._config["display_label_popup"] or not text:
             previous_text = self.labelDialog.edit.text()
             text, flags, group_id, description = self.labelDialog.popUp(text)
@@ -2670,9 +2691,15 @@ class MainWindow(QtWidgets.QMainWindow):
             "linestrip": self.actions.createLineStripMode,
             "ai_polygon": self.actions.createAiPolygonMode,
             "ai_mask": self.actions.createAiMaskMode,
+            "box": self.actions.createBoxMode,
         }
+        if not edit and createMode == "box":
+            if self.canvas.fixedRectWidth is None and self.canvas.fixedRectHeight is None:
+                if not self.setBoxSize():
+                    return
 
         self.canvas.setEditing(edit)
+        
         self.canvas.createMode = createMode
         if edit:
             for draw_action in draw_actions.values():
@@ -2685,6 +2712,16 @@ class MainWindow(QtWidgets.QMainWindow):
     ## Set mode to edit.
     def setEditMode(self):
         self.toggleDrawMode(True)
+
+    def setBoxSize(self):
+        dialog = BoxSettingsDialog(self.canvas.fixedRectWidth, self.canvas.fixedRectHeight)
+
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            self.canvas.fixedRectWidth = int(dialog.widthTxt.text())
+            self.canvas.fixedRectHeight = int(dialog.heightTxt.text())
+            return True
+        
+        return False
 
     ############### Zoom Funtions ###############
 

@@ -27,3 +27,5 @@ from .extract_frames_dialog import ExtractFramesDialog
 from .save_dialog import SaveDialog
 
 from .save_setting_dialog import SaveSettingDialog
+
+from .box_setting_dialog import BoxSettingsDialog
