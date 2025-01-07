@@ -1021,6 +1021,7 @@ class MainWindow(QtWidgets.QMainWindow):
         actions = (
             self.actions.createMode,
             self.actions.createRectangleMode,
+            self.actions.createBoxMode,
             self.actions.createCircleMode,
             self.actions.createLineMode,
             self.actions.createPointMode,

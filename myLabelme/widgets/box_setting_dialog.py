@@ -31,13 +31,16 @@ class BoxSettingsDialog(QDialog):
         
 
         btnsLayout = QHBoxLayout()
-        setBtn = QPushButton("Set")
+        self.setBtn = QPushButton("Set")
         cancelBtn = QPushButton("Cancel")
-        btnsLayout.addWidget(setBtn)
+        btnsLayout.addWidget(self.setBtn)
         btnsLayout.addWidget(cancelBtn)
         btnsLayout.setAlignment(Qt.AlignCenter)
-        setBtn.clicked.connect(self.accept)
+
+        self.setBtn.clicked.connect(self.accept)
         cancelBtn.clicked.connect(self.reject)
+        self.widthTxt.textChanged.connect(self.isFieldsEmpty)
+        self.heightTxt.textChanged.connect(self.isFieldsEmpty)
         
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(self.lbl1)
@@ -49,3 +52,11 @@ class BoxSettingsDialog(QDialog):
         self.setLayout(mainLayout)
 
         self.adjustSize()
+
+
+    def isFieldsEmpty(self):
+        self.setBtn.setEnabled(self.widthTxt.text() != "" and self.heightTxt.text() != "")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.isFieldsEmpty()
