@@ -206,6 +206,23 @@ class LabelFile(object):
         imgArr = utils.img_data_to_arr(self.imageData)
 
         return imgArr.shape[:2]
+    
+    @staticmethod
+    def getGroupIds(filename):
+        ids = []
+        try:
+            with open(filename, "r") as f:
+                data = json.load(f)
+
+                for s in data["shapes"]:
+                    group_id=s.get("group_id")
+                    if group_id is not None:
+                        ids.append(group_id)
+
+            return ids
+        except Exception as e:
+            return []
+
 
 ## Yolo Format Label file
 class YoloLabelFile(LabelFile):
@@ -398,6 +415,7 @@ class YoloLabelFile(LabelFile):
 ## Label Studio Format Label File.
 class VideoLabelFile(LabelFile):
     labelFilePath = None
+    objectsCount = None
     def __init__(self):
         super().__init__(None)
 
@@ -470,3 +488,14 @@ class VideoLabelFile(LabelFile):
         height = int(imgShape[0]*koords["height"]/100)
 
         return [[x,y], [x+width,y+height]]
+    
+    @staticmethod
+    def countObjects():
+        try:
+            with open(VideoLabelFile.labelFilePath, "r") as f:
+                    data = json.load(f)
+                
+            VideoLabelFile.objectsCount = len(data[0]["annotations"][0]["result"])
+            return VideoLabelFile.objectsCount
+        except:
+            return None

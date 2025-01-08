@@ -42,6 +42,9 @@ class LabelDialog(QtWidgets.QDialog):
             fit_to_content = {"row": False, "column": True}
         self._fit_to_content = fit_to_content
 
+        self.uniqueIds = set()
+        self.currentIds = []
+
         super(LabelDialog, self).__init__(parent)
         self.edit = LabelQLineEdit()
         self.edit.setPlaceholderText(text)
@@ -60,6 +63,11 @@ class LabelDialog(QtWidgets.QDialog):
             layout_edit.addWidget(self.edit, 6)
             layout_edit.addWidget(self.edit_group_id, 2)
             layout.addLayout(layout_edit)
+
+        self.errorlbl = QtWidgets.QLabel()
+        self.errorlbl.setStyleSheet("color: #F00;")
+        self.errorlbl.setVisible(False)
+        layout.addWidget(self.errorlbl)
         # buttons
         self.buttonBox = bb = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
@@ -71,6 +79,10 @@ class LabelDialog(QtWidgets.QDialog):
         bb.accepted.connect(self.validate)
         bb.rejected.connect(self.reject)
         layout.addWidget(bb)
+
+        self.groupIdSuggestion = QtWidgets.QLabel("Unused Group ID: 0")
+        layout.addWidget(self.groupIdSuggestion)
+
         # label_list
         self.labelList = QtWidgets.QListWidget()
         if self._fit_to_content["row"]:
@@ -135,14 +147,44 @@ class LabelDialog(QtWidgets.QDialog):
             return
         self.edit.setText(item.text())
 
+    # def validate(self):
+    #     text = self.edit.text()
+    #     if hasattr(text, "strip"):
+    #         text = text.strip()
+    #     else:
+    #         text = text.trimmed()
+    #     if text:
+    #         self.accept()
+
     def validate(self):
         text = self.edit.text()
+        group_id = self.edit_group_id.text()
         if hasattr(text, "strip"):
             text = text.strip()
         else:
             text = text.trimmed()
+
         if text:
+            if group_id and int(group_id) in self.currentIds:
+                self.errorlbl.setText("**ID already used in current image.")
+                self.errorlbl.setVisible(True)
+                self.adjustSize()
+                QtCore.QTimer().singleShot(4000, self.hideError)
+                return
+            
             self.accept()
+        else:
+            self.errorlbl.setText("**Label name must be added.")
+            self.errorlbl.setVisible(True)
+            self.adjustSize()
+            QtCore.QTimer().singleShot(4000, self.hideError)
+
+        # if text:
+        #     self.accept()
+
+    def hideError(self):
+        self.errorlbl.setVisible(False)
+        self.adjustSize()
 
     def labelDoubleClicked(self, item):
         self.validate()
@@ -235,11 +277,20 @@ class LabelDialog(QtWidgets.QDialog):
         self.edit.setFocus(QtCore.Qt.PopupFocusReason)
         if move:
             self.move(QtGui.QCursor.pos())
+
+        id = 0
+        while id in self.uniqueIds:
+            id+=1
+        self.groupIdSuggestion.setText(f"Unused Group ID : {id}")
         if self.exec_():
+            groupid = self.getGroupId()
+            if groupid is not None:
+                self.uniqueIds.add(groupid)
+            print(self.uniqueIds)
             return (
                 self.edit.text(),
                 self.getFlags(),
-                self.getGroupId(),
+                groupid,
                 self.editDescription.toPlainText(),
             )
         else:

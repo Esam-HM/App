@@ -1876,6 +1876,12 @@ class MainWindow(QtWidgets.QMainWindow):
         shape = item.shape()
         if shape is None:
             return
+        
+        self.labelDialog.currentIds = []
+        for _item in self.labelList:
+            if  _item!= item:
+                self.labelDialog.currentIds.append(_item.shape().group_id) 
+
         text, flags, group_id, description = self.labelDialog.popUp(
             text=shape.label,
             flags=shape.flags,
@@ -2211,6 +2217,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.uniqLabelList.clear()
         self.uniqLabelList.labels = []
         self.labelDialog.deleteAllLabels()
+        self.labelDialog.uniqueIds.clear()
 
     def toggleActions(self, value=True):
         '''Enable/Disable widgets which depend on an opened image.'''
@@ -2617,6 +2624,12 @@ class MainWindow(QtWidgets.QMainWindow):
         group_id = None
         description = ""
         print("new shape")
+
+        self.labelDialog.currentIds = []
+        for item in self.labelList:
+            group_id = item.shape().group_id
+            self.labelDialog.currentIds.append(group_id)
+
         if self._config["display_label_popup"] or not text:
             previous_text = self.labelDialog.edit.text()
             text, flags, group_id, description = self.labelDialog.popUp(text)
@@ -2879,15 +2892,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if self.labelFileType==2:
                 VideoLabelFile.labelFilePath = dialog.getSelectedPath()
+                objectsCount = VideoLabelFile.countObjects()
+                self.labelDialog.uniqueIds.update(range(objectsCount) if objectsCount is not None else [])
                 self.labelFilesDir = None
             else:
                 self.labelFilesDir = dialog.getSelectedPath()
                 VideoLabelFile.labelFilePath = None
 
+                if self.labelFileType == 0 and self.imagePath:
+                    self.getGroupIdsFromFiles()
+                    print(self.labelDialog.uniqueIds)
+
             self.loadShapesFromFile = True
 
             if self.imagePath:   ## Load annotations if image/s is open.
                 self.loadFile(self.imagePath)
+
+    def getGroupIdsFromFiles(self):
+        images = self.buffer.keys()
+
+        for image in images:
+            label_file = osp.splitext(image)[0] + ".json"
+            label_file = osp.join(self.labelFilesDir, osp.basename(label_file))
+            self.labelDialog.uniqueIds.update(LabelFile.getGroupIds(label_file))
 
     def addLabelsFromLegend(self, legend:list):
         self.uniqLabelList.clear()
