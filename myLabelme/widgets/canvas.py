@@ -102,8 +102,8 @@ class Canvas(QtWidgets.QWidget):
         self.setFocusPolicy(QtCore.Qt.WheelFocus)
 
         self._ai_model = None
-        self.fixedRectWidth = None
-        self.fixedRectHeight = None
+        self.boxWidth = None
+        self.boxHeight = None
 
     def fillDrawing(self):
         return self._fill_drawing
@@ -455,8 +455,8 @@ class Canvas(QtWidgets.QWidget):
                         shape_type= shape_type
                     )
                     if self.createMode == "box":
-                        top_left = QtCore.QPointF(pos.x() - self.fixedRectWidth / 2, pos.y() - self.fixedRectHeight / 2)
-                        bottom_right = QtCore.QPointF(pos.x() + self.fixedRectWidth / 2, pos.y() + self.fixedRectHeight / 2)
+                        top_left = QtCore.QPointF(pos.x() - self.boxWidth / 2, pos.y() - self.boxHeight / 2)
+                        bottom_right = QtCore.QPointF(pos.x() + self.boxWidth / 2, pos.y() + self.boxHeight / 2)
                         if not self.outOfPixmap(top_left) and not self.outOfPixmap(bottom_right):
                             self.current.points = [top_left, bottom_right]
                             self.finalise()

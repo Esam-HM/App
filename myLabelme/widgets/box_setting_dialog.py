@@ -1,5 +1,5 @@
 from qtpy.QtWidgets import (
-    QDialog, QLabel, QLineEdit, QDialogButtonBox, QVBoxLayout, QPushButton, QHBoxLayout
+    QDialog, QLabel, QLineEdit, QVBoxLayout, QPushButton, QHBoxLayout
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QIntValidator

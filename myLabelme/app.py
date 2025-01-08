@@ -2695,7 +2695,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "box": self.actions.createBoxMode,
         }
         if not edit and createMode == "box":
-            if self.canvas.fixedRectWidth is None and self.canvas.fixedRectHeight is None:
+            if self.canvas.boxWidth is None and self.canvas.boxHeight is None:
                 if not self.setBoxSize():
                     return
 
@@ -2715,11 +2715,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggleDrawMode(True)
 
     def setBoxSize(self):
-        dialog = BoxSettingsDialog(self.canvas.fixedRectWidth, self.canvas.fixedRectHeight)
+        dialog = BoxSettingsDialog(self.canvas.boxWidth, self.canvas.boxHeight)
 
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
-            self.canvas.fixedRectWidth = int(dialog.widthTxt.text())
-            self.canvas.fixedRectHeight = int(dialog.heightTxt.text())
+            self.canvas.boxWidth = int(dialog.widthTxt.text())
+            self.canvas.boxHeight = int(dialog.heightTxt.text())
             return True
         
         return False
