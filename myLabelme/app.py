@@ -23,7 +23,7 @@ from .widgets import (BrightnessContrastDialog, Canvas,
                              UniqueLabelQListWidget,
                              ZoomWidget, ExtractFramesDialog,
                              LoadLabelFilesDialog, SaveDialog, SaveSettingDialog,
-                             BoxSettingsDialog,)
+                             BoxSettingsDialog, GenerateLegendDialog)
 from . import utils
 
 
@@ -1880,7 +1880,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelDialog.currentIds = []
         for _item in self.labelList:
             if  _item!= item:
-                self.labelDialog.currentIds.append(_item.shape().group_id) 
+                self.labelDialog.currentIds.append(_item.shape().group_id)
 
         text, flags, group_id, description = self.labelDialog.popUp(
             text=shape.label,
@@ -2090,16 +2090,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 legendPath = YoloLabelFile.outputLegendPath
             else:
                 legendPath = YoloLabelFile.inputlegendPath
-            dialog = SaveDialog(dirPath= defPath, legendPath=legendPath)
+            dialog = SaveDialog(dirPath= defPath, legendPath=legendPath, labels=self.uniqLabelList.labels)
             if dialog.exec_() != QtWidgets.QDialog.Rejected:
-
                 if dialog.toSave == True:      ## save
                     self.outputFileFormat = dialog.selectedOption
                     self.output_dir = dialog.selectedDir
-                    legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
-                    if legend is not None:
-                        YoloLabelFile.outputLegendPath = dialog.selectedLegend
-                        YoloLabelFile.outputLegend = legend
+                    if self.outputFileFormat == 1:
+                        if dialog.outputLegend:
+                            legend = dialog.outputLegend
+                        elif dialog.selectedLegend:
+                            legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
+                        if legend is not None:
+                            YoloLabelFile.outputLegendPath = dialog.selectedLegend
+                            YoloLabelFile.outputLegend = legend
                     if singleFile:
                         #print("Save single file")
                         self.saveFile()
@@ -2209,11 +2212,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelFileType = 0
         self.loadShapesFromFile = False
         self.actions.saveAuto.setChecked(False)
-        YoloLabelFile.legend = []
+        YoloLabelFile.inputLegend = []
         VideoLabelFile.labelFilePath = None
         self.output_dir = None
         self.outputFileFormat = None
-        YoloLabelFile.outputLegend = []
+        YoloLabelFile.outputLegend = {}
         self.uniqLabelList.clear()
         self.uniqLabelList.labels = []
         self.labelDialog.deleteAllLabels()
@@ -2354,20 +2357,25 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             legendPath = YoloLabelFile.inputlegendPath
 
-        dialog = SaveSettingDialog(self.outputFileFormat, defaultDir, legendPath, self.actions.saveAuto.isChecked())
+        dialog = SaveSettingDialog(self.outputFileFormat, defaultDir, legendPath, self.actions.saveAuto.isChecked(), self.uniqLabelList.labels)
 
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             self.outputFileFormat = dialog.selectedOption
             self.output_dir = dialog.selectedDir
             self.actions.saveAuto.setChecked(dialog.saveAuto)
 
-            legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
-            if legend is not None:
-                YoloLabelFile.outputLegendPath = dialog.selectedLegend
-                YoloLabelFile.outputLegend = legend
-                if self.labelDialog.labelList.count()>0:
-                    self.labelDialog.deleteAllLabels()
-                self.labelDialog.addLabels(legend)
+            if self.outputFileFormat == 1:
+                if dialog.outputLegend:
+                    legend = dialog.outputLegend
+                elif dialog.selectedLegend:
+                    legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
+                
+                if legend is not None:
+                    YoloLabelFile.outputLegendPath = dialog.selectedLegend
+                    YoloLabelFile.outputLegend = legend
+                    if self.labelDialog.labelList.count()>0:
+                        self.labelDialog.deleteAllLabels()
+                    self.labelDialog.addLabels(legend)
 
             self.statusBar().showMessage(
                 self.tr("Annotations will be saved in '%s'")
@@ -2436,6 +2444,9 @@ class MainWindow(QtWidgets.QMainWindow):
             filters,
         )
 
+        if filename and osp.splitext(filename)[1].lower()==".txt":
+            self.toLoadLegend()
+
         return filename
 
     def _saveFile(self, filename):
@@ -2497,14 +2508,9 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 if fileSuffix == LabelFile.outputSuffixes[1]:
                     lf = YoloLabelFile()
-                    classList = []
-                    if YoloLabelFile.outputLegend:
-                        classList = YoloLabelFile.outputLegend
-                    else:
-                        classList = self.uniqLabelList.labels
-                    lf.save(filename, shapes, imgSize, classList)
+                    lf.save(filename, shapes, imgSize)
             self.buffer[imgPath]["dirty"] = False
-            ##self.labelFile = lf
+
             items = self.fileListWidget.findItems(imgPath, Qt.MatchExactly)
                 
             if len(items) > 0:
@@ -2607,6 +2613,52 @@ class MainWindow(QtWidgets.QMainWindow):
         self.buffer[self.imagePath]["flags"] = flags        # dict
         self.buffer[self.imagePath]["dirty"] = self.dirty   # bool
         self.buffer[self.imagePath]["undo"] = self.canvas.shapesBackups # list
+
+    def toLoadLegend(self):
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("%s - Legend" % __appname__)
+        msg.setText("<p>Do you want to save your annotations with specific legend?<br><strong>Note</strong>Each class in your legend file must be listed on a separate line.</p>")
+        loadBtn = msg.addButton("Load Legend", QtWidgets.QMessageBox.ActionRole)
+        generateBtn = msg.addButton("Generate File", QtWidgets.QMessageBox.ActionRole)
+        skipBtn = msg.addButton("Skip", QtWidgets.QMessageBox.RejectRole)
+
+        msg.exec_()
+
+        if msg.clickedButton() == loadBtn:
+            file = self.selectLegend(osp.dirname(self.imagePath))
+            if file:
+                tmp = YoloLabelFile.loadLegendFile(file)
+                if tmp:
+                    YoloLabelFile.tempLegend = tmp
+                else:
+                    YoloLabelFile.tempLegend = {}
+
+        elif msg.clickedButton() == generateBtn:
+            self.openGenerateLegendDialog()
+        else:
+            pass
+
+    def openGenerateLegendDialog(self):
+        dialog = GenerateLegendDialog(self.uniqLabelList.labels, osp.dirname(self.imagePath))
+
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            YoloLabelFile.tempLegend = {}
+            if dialog.legend_data:
+                for key, val in dialog.legend_data.items():
+                    YoloLabelFile.tempLegend[val] = key
+        
+    def selectLegend(self, defaultDir:str):
+        selectedFile, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "%s - Select Legend File",
+            defaultDir,
+            "Legend Files (*.txt)",
+        )
+
+        if selectedFile and osp.splitext(selectedFile)[1].lower()==".txt":
+            return selectedFile
+        
+        return None
 
     ##############   Canvas   #############
 
@@ -2882,13 +2934,8 @@ class MainWindow(QtWidgets.QMainWindow):
             legend = YoloLabelFile.loadLegendFile(dialog.getSelectedLegend())
             if legend is not None:
                 YoloLabelFile.inputlegendPath = dialog.getSelectedLegend()
-                YoloLabelFile.legend = legend
-                # if self.labelDialog.labelList.count()>0:
-                #     self.labelDialog.labelList.clear()
+                YoloLabelFile.inputLegend = list(legend.keys())
                 self.labelDialog.addLabels(YoloLabelFile.legend)
-                #self.addLabelsFromLegend(YoloLabelFile.legend)
-            # if YoloLabelFile.loadLegendFile(dialog.getSelectedLegend()):
-            #     self.labelDialog.addLabels(YoloLabelFile.legend)
 
             if self.labelFileType==2:
                 VideoLabelFile.labelFilePath = dialog.getSelectedPath()
@@ -2901,7 +2948,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 if self.labelFileType == 0 and self.imagePath:
                     self.getGroupIdsFromFiles()
-                    print(self.labelDialog.uniqueIds)
 
             self.loadShapesFromFile = True
 
@@ -2945,13 +2991,29 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not selectedFilePath:
             return
+        
         self.labelList.clear()
         if osp.splitext(selectedFilePath)[1] == ".txt":
+            msg = QtWidgets.QMessageBox
+            replay = msg.question(
+                self,
+                "Legend File",
+                "Do you want to load a legend file?",
+                msg.Yes | msg.No,
+                msg.No,
+            )
+            if replay == msg.Yes:
+                ff = self.selectLegend(YoloLabelFile.inputlegendPath if YoloLabelFile.inputlegendPath else osp.dirname(self.imagePath))
+                if ff and osp.splitext(ff)[1].lower()==".txt":
+                    tmp = YoloLabelFile.loadLegendFile(ff)
+                    if tmp:
+                        YoloLabelFile.tempLegend = list(tmp.keys())
+                    else:
+                        YoloLabelFile.tempLegend = []
+
             self.lblFileLoaders.get(1)(None,selectedFilePath,True)
         else:
             self.lblFileLoaders.get(0)(None,selectedFilePath,True)
-        # if selectedFilePath:
-        #     self.lblFileLoaders.get(self.labelFileType)(None,selectedFilePath,True)
 
     ##########  AI Actions ###########
 

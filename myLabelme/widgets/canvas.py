@@ -507,7 +507,7 @@ class Canvas(QtWidgets.QWidget):
             self.prevPoint = pos
 
     def mouseReleaseEvent(self, ev):
-        print("mouseReleaseEvent")
+        #print("mouseReleaseEvent")
         if ev.button() == QtCore.Qt.RightButton:
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
@@ -664,8 +664,11 @@ class Canvas(QtWidgets.QWidget):
         deleted_shapes = []
         if self.selectedShapes:
             for shape in self.selectedShapes:
-                self.shapes.remove(shape)
-                deleted_shapes.append(shape)
+                try:
+                    self.shapes.remove(shape)
+                    deleted_shapes.append(shape)
+                except Exception:
+                    pass
             self.storeShapes()
             self.selectedShapes = []
             self.update()
@@ -702,7 +705,7 @@ class Canvas(QtWidgets.QWidget):
             self.boundedMoveShapes(shapes, point + offset)
 
     def paintEvent(self, event):
-        print("paint event")
+        #print("paint event")
         if not self.pixmap:
             return super(Canvas, self).paintEvent(event)
 
@@ -826,7 +829,7 @@ class Canvas(QtWidgets.QWidget):
         return not (0 <= p.x() <= w - 1 and 0 <= p.y() <= h - 1)
 
     def finalise(self):
-        print("finalize")
+        #print("finalize")
         assert self.current
         if self.createMode == "ai_polygon":
             # convert points to polygon by an AI model
@@ -860,9 +863,9 @@ class Canvas(QtWidgets.QWidget):
         self.storeShapes()
         self.current = None
         self.setHiding(False)
-        print("emit new shape")
+        #print("emit new shape")
         self.newShape.emit()
-        print("previous update")
+        #print("previous update")
         self.update()
 
     def closeEnough(self, p1, p2):
@@ -973,7 +976,7 @@ class Canvas(QtWidgets.QWidget):
             self.movingShape = True
 
     def keyPressEvent(self, ev):
-        print("key press event")
+        #print("key press event")
         modifiers = ev.modifiers()
         key = ev.key()
         if self.drawing():
@@ -1005,7 +1008,7 @@ class Canvas(QtWidgets.QWidget):
                 self.moveByKeyboard(QtCore.QPointF(MOVE_SPEED, 0.0))
 
     def keyReleaseEvent(self, ev):
-        print("key release event")
+        #print("key release event")
         modifiers = ev.modifiers()
         if self.drawing():
             if int(modifiers) == 0:

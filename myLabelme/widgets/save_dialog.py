@@ -1,16 +1,19 @@
-from qtpy.QtWidgets import QFileDialog, QDialog, QLabel, QCheckBox, QComboBox, QLineEdit, QVBoxLayout, QWidget, QHBoxLayout, QDialogButtonBox, QPushButton
+from qtpy.QtWidgets import QFileDialog, QDialog, QLabel, QFrame, QComboBox, QLineEdit, QVBoxLayout, QWidget, QHBoxLayout, QPushButton
 from qtpy.QtCore import Qt, QTimer
 from .. import __appname__
 from os import path as osp
+from . import GenerateLegendDialog
 
 
 class SaveDialog(QDialog):
-    def __init__(self,selectedOption:int=0, dirPath:str=None, legendPath:str=None):
+    def __init__(self,selectedOption:int=0, dirPath:str=None, legendPath:str=None, labels:list=None):
         super().__init__()
         self.selectedOption = selectedOption if selectedOption else 0
         self.selectedDir = dirPath
         self.selectedLegend = legendPath
         self.toSave = None
+        self.labels = labels
+        self.outputLegend = {}
         self.setWindowTitle("%s - Save Annotations" % __appname__)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(400,250)
@@ -65,7 +68,7 @@ class SaveDialog(QDialog):
         lbl3 = QLabel("Select Your Legend File (*.txt):")
         hLayout3 = QHBoxLayout()
         self.legendPathEditTxt = QLineEdit()
-        self.legendPathEditTxt.setPlaceholderText("*Your Legend File Path")
+        self.legendPathEditTxt.setPlaceholderText("Your Legend File Path (*Optional)")
         if self.selectedLegend:
             self.legendPathEditTxt.setText(self.selectedLegend)
         browseLegendBtn = QPushButton("Browse")
@@ -73,7 +76,25 @@ class SaveDialog(QDialog):
         self.legendPathErrorLbl.setStyleSheet("color: #f00;")
         self.legendPathErrorLbl.setContentsMargins(0,0,0,0)
         self.legendPathErrorLbl.setVisible(False)
-        notLbl = QLabel("<strong>Not:</strong> Classes must be in seperated lines.")
+        ## Left line
+        leftLine = QFrame()
+        leftLine.setFrameShape(QFrame.HLine)
+        leftLine.setFrameShadow(QFrame.Sunken)
+        orLbl = QLabel("or")
+        #orLbl.setStyleSheet("padding: 0 5px;")
+        rightLine = QFrame()
+        rightLine.setFrameShape(QFrame.HLine)
+        rightLine.setFrameShadow(QFrame.Sunken)
+        h_layoutLine = QHBoxLayout()
+        h_layoutLine.addWidget(leftLine, 1)
+        h_layoutLine.addWidget(orLbl, 0)
+        h_layoutLine.addWidget(rightLine, 1)
+        ## Generate Legend
+        generateBtn = QPushButton("Generate Legend")
+        self.retLbl = QLabel("Your Legend has been generated successfully")
+        self.retLbl.setStyleSheet("color: #0F0;")
+        self.retLbl.setVisible(False)
+        notLbl = QLabel("<strong>Note:</strong> Classes must be in seperated lines.")
         hLayout3.addWidget(self.legendPathEditTxt)
         hLayout3.addWidget(browseLegendBtn)
         hLayout3.setContentsMargins(0,0,0,0)
@@ -81,6 +102,9 @@ class SaveDialog(QDialog):
         layout3.addLayout(hLayout3)
         layout3.addWidget(self.legendPathErrorLbl)
         layout3.addWidget(notLbl)
+        layout3.addLayout(h_layoutLine)
+        layout3.addWidget(generateBtn)
+        layout3.addWidget(self.retLbl)
         layout3.setContentsMargins(margins.left(),margins.top(),margins.right(),10)
         self.widget3.setLayout(layout3)
         self.widget3.setVisible(False)
@@ -109,11 +133,10 @@ class SaveDialog(QDialog):
         self.saveBtn.clicked.connect(self.saveBtnClicked)
         discardBtn.clicked.connect(self.discardBtnClicked)
         cancelBtn.clicked.connect(self.reject)
+        generateBtn.clicked.connect(self.generateLegend)
         browseDirBtn.clicked.connect(self.selectOutputDir)
         browseLegendBtn.clicked.connect(self.selectLegendFile)
-        #self.dirpathEditTxt.textChanged.connect(self.isDirPathEmpty)
-        self.dirpathEditTxt.textChanged.connect(self.isFieldsEmpty)
-        self.legendPathEditTxt.textChanged.connect(self.isFieldsEmpty)
+        self.dirpathEditTxt.textChanged.connect(self.isDirPathEmpty)
         self.comboBox.currentIndexChanged.connect(self.formatSelectionChanged)
 
     def getCurrentOption(self):
@@ -124,7 +147,24 @@ class SaveDialog(QDialog):
     
     def getSelectedLegend(self):
         return self.selectedLegend
+    
+    def generateLegend(self):
+        dialog = GenerateLegendDialog(self.labels, self.selectedDir)
 
+        if dialog.exec_() == QDialog.Accepted:
+            self.outputLegend = {}
+            if dialog.legend_data:
+                for key, val in dialog.legend_data.items():
+                    self.outputLegend[val] = key
+            if dialog.savedLegendPath:
+                self.legendPathEditTxt.setText(dialog.savedLegendPath)
+                self.selectedLegend = dialog.savedLegendPath
+        
+        if self.outputLegend:
+            self.retLbl.setVisible(True)
+        else:
+            self.retLbl.setVisible(False)
+        self.adjustSize()
 
     def saveBtnClicked(self):
         path = self.dirpathEditTxt.text()
@@ -136,16 +176,18 @@ class SaveDialog(QDialog):
 
         if self.widget3.isVisible():
             path = self.legendPathEditTxt.text()
-            if not osp.exists(path):
-                self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Invalid Path")
-                return
+            if path:
+                if not osp.exists(path):
+                    self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Invalid Path")
+                    return
+                
+                if osp.splitext(path)[1].lower() !=".txt":
+                    self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Only (.txt) file accepted.")
+                    return
             
-            if osp.splitext(path)[1].lower() !=".txt":
-                self.showError(self.legendPathEditTxt, self.legendPathErrorLbl, "*** Only (.txt) file accepted.")
-                return
-            
-            self.selectedLegend = path
-        
+                self.selectedLegend = path
+            else:
+                self.selectedLegend = None
         ## Save settings.
         self.selectedOption = self.comboBox.currentIndex()
         self.toSave = True
@@ -188,14 +230,6 @@ class SaveDialog(QDialog):
     def formatSelectionChanged(self):
         self.widget3.setVisible(self.comboBox.currentIndex()==1)
         self.adjustSize()
-        self.isFieldsEmpty()
-
-
-    def isFieldsEmpty(self):
-        if self.widget3.isVisible():
-            self.saveBtn.setEnabled(self.legendPathEditTxt.text()!="" and self.dirpathEditTxt.text!="")
-        else:
-            self.saveBtn.setEnabled(self.dirpathEditTxt.text!="")
 
     def isDirPathEmpty(self):
         self.saveBtn.setEnabled(not self.dirpathEditTxt.text()=="")
@@ -216,5 +250,11 @@ class SaveDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.isFieldsEmpty()
-        # self.isDirPathEmpty()
+        self.isDirPathEmpty()
+
+
+    # def isFieldsEmpty(self):
+    #     if self.widget3.isVisible():
+    #         self.saveBtn.setEnabled(self.legendPathEditTxt.text()!="" and self.dirpathEditTxt.text!="")
+    #     else:
+    #         self.saveBtn.setEnabled(self.dirpathEditTxt.text!="")

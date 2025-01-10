@@ -24,6 +24,8 @@ from .load_label_files_dialog import LoadLabelFilesDialog
 
 from .extract_frames_dialog import ExtractFramesDialog
 
+from .legend_dialog import GenerateLegendDialog
+
 from .save_dialog import SaveDialog
 
 from .save_setting_dialog import SaveSettingDialog

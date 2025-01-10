@@ -12,6 +12,7 @@ class UniqueLabelQListWidget(EscapableQListWidget):
     def __init__(self):
         super().__init__()
         self.labels = []
+        
     def mousePressEvent(self, event):
         super(UniqueLabelQListWidget, self).mousePressEvent(event)
         if not self.indexAt(event.pos()).isValid():
@@ -46,5 +47,5 @@ class UniqueLabelQListWidget(EscapableQListWidget):
         item.setSizeHint(qlabel.sizeHint())
 
         self.setItemWidget(item, qlabel)
-
+        
         self.labels.append(label)
