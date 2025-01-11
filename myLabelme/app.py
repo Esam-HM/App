@@ -209,6 +209,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.file_dock.setWidget(fileListWidget)
         self.fileListWidget.itemSelectionChanged.connect(self.fileSelectionChanged)
         self.fileSearch.textChanged.connect(self.fileSearchChanged)
+        self.fileListWidget.model().rowsInserted.connect(lambda: self.fileListChanged())
+        self.fileListWidget.model().rowsRemoved.connect(lambda: self.fileListChanged())
 
         ## config
         if config["file_search"]:
@@ -748,10 +750,9 @@ class MainWindow(QtWidgets.QMainWindow):
             "edit_icon",
             self.tr("Set or change box width and height."),
         )
-        ## XXX
         fillGapVideo = action(
             self.tr("&Fill Video Gaps"),
-            None,
+            self.fillGapVideo,
             tip=self.tr("Fill gaps in video between two non-empty frames(only for labels with same ID numbers)"),
             enabled=False,
         )
@@ -780,6 +781,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.selectObjModel,
             icon="ai",
             tip=self.tr("Select a model for object detection"),
+        )
+        trajectory = action(
+            self.tr("&Draw Trajectory"),
+            self.drawTrajectory,
+            None,
+            "trajectory",
+            self.tr("Make track trajectory on annotated frames"),
+            enabled= False,
         )
 
         # Store actions for further handling.
@@ -824,6 +833,7 @@ class MainWindow(QtWidgets.QMainWindow):
             fitWindow=fitWindow,
             fitWidth=fitWidth,
             brightnessContrast=brightnessContrast,
+            fillGapVideo=fillGapVideo,
             zoomActions=(),
             fileMenuActions=(open_, opendir, save, saveAll, saveAs, saveAllAs, close, quit),
             tool=(),
@@ -841,7 +851,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 None,
                 removePoint,
                 None,
+                fillGapVideo,
+                None,
                 setBoxSize,
+                None,
                 toggle_keep_prev_mode,
             ),
             # menu shown at right click
@@ -881,11 +894,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 brightnessContrast,
                 loadAnnotationFile,
             ),
-            onShapesPresent=(saveAs, saveAllAs, deleteAll, hideAll, showAll, toggleAll),
+            onShapesPresent=(saveAs, deleteAll, hideAll, showAll, toggleAll),
+            onDirLoad = (fillGapVideo,),
             extractFrames=extractFrames,
             loadLblFiles=loadLblFiles,
             loadAnnotationFile=loadAnnotationFile,
             selectAiModelFile=selectAiModelFile,
+            trajectory = trajectory,
         )
 
 
@@ -912,6 +927,8 @@ class MainWindow(QtWidgets.QMainWindow):
             zoom,
             None,
             yoloMainAction,
+            None,
+            trajectory,
         )
         # Group zoom controls into a list for easier toggling.
         self.actions.zoomActions = (
@@ -1182,9 +1199,9 @@ class MainWindow(QtWidgets.QMainWindow):
             filters,
         )
         if selectedFilePath:
+            self.resetApplicationState()
             if self.fileListWidget.count()>0:
                 self.fileListWidget.clear()
-                self.resetApplicationState()
                 self.actions.openNextImg.setEnabled(False)
                 self.actions.openPrevImg.setEnabled(False)
             self.loadFile(selectedFilePath)
@@ -1500,9 +1517,9 @@ class MainWindow(QtWidgets.QMainWindow):
     ## Used when openning file from recent files menu.
     def loadRecent(self, filename):
         if self.mayContinue():
+            self.resetApplicationState()
             if self.fileListWidget.count()>0:
                 self.fileListWidget.clear()
-                self.resetApplicationState()
                 self.actions.openNextImg.setEnabled(False)
                 self.actions.openPrevImg.setEnabled(False)
             self.loadFile(filename)
@@ -1995,7 +2012,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if currIndex < self.fileListWidget.count():
                 filename = item.text()
                 if filename:
-                    self.actions.saveAll.setEnabled(self.isAllDirty())
+                    #self.actions.saveAll.setEnabled(self.isAllDirty())
+                    self.toggleAllBtns()
                     self.loadFile(filename)
 
     ## Adding all files from fileList to image list.
@@ -2075,6 +2093,14 @@ class MainWindow(QtWidgets.QMainWindow):
             #     self.fileListWidget.takeItem(currItemRow)
 
             self.resetFileListWidget()
+
+    def fileListChanged(self):
+        if self.fileListWidget.count() == 0:
+            for action in self.actions.onDirLoad:
+                action.setEnabled(False)
+        else:
+            for action in self.actions.onDirLoad:
+                action.setEnabled(True)
 
     ##############  utils  #############
 
@@ -2225,6 +2251,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.uniqLabelList.labels = []
         self.labelDialog.deleteAllLabels()
         self.labelDialog.uniqueIds.clear()
+        self.actions.saveAll.setEnabled(False)
+        self.actions.saveAllAs.setEnabled(False)
 
     def toggleActions(self, value=True):
         '''Enable/Disable widgets which depend on an opened image.'''
@@ -2545,6 +2573,25 @@ class MainWindow(QtWidgets.QMainWindow):
             i+=1
 
         return dirty
+
+    def toggleAllBtns(self):
+        i=0
+        clean = True
+        noShape = True
+
+        while (clean or noShape) and i<self.fileListWidget.count():
+            image_path = self.fileListWidget.item(i).text()
+            if self.buffer[image_path].get("dirty",False):
+               clean = False
+               noShape = False
+            else:
+                if self.buffer[image_path].get("shapes"):
+                    noShape = False 
+            i+=1 
+        
+        self.actions.saveAll.setEnabled(not clean)
+        self.actions.saveAllAs.setEnabled(not noShape)
+        self.actions.trajectory.setEnabled(self.fileListWidget.currentRow()==self.fileListWidget.count()-1)
     
     def allNoShapes(self):
         next = True
@@ -2562,6 +2609,10 @@ class MainWindow(QtWidgets.QMainWindow):
         Save all images found in files list
         '''
         #print("All files saved")
+        if self.fileListWidget.count()<=0:
+            self.actions.saveAll.setEnabled(False)
+            return
+
         if self.outputFileFormat is None or not self.output_dir:
             if not self.setSaveSettings():
                 return
@@ -2604,6 +2655,9 @@ class MainWindow(QtWidgets.QMainWindow):
         progress_dialog.close()
     
     def saveAllOutputFilesAs(self):
+        if self.fileListWidget.count()<=0:
+            self.actions.saveAllAs.setEnabled(False)
+            return
         if self.output_dir:
             defaultDir = self.output_dir
         else:
@@ -3260,3 +3314,88 @@ class MainWindow(QtWidgets.QMainWindow):
         self._runYoloButton.setEnabled(flag2 and flag3)
         self._runYoloVidButton.setEnabled(flag1 and flag2 and flag3)
         self._runYoloTrackButton.setEnabled(flag1 and flag2 and flag3)
+
+    def drawTrajectory(self):
+        if self.fileListWidget.count()<=0:
+            self.actions.trajectory.setEnabled(False)
+            return
+        # i=0
+        # next = True
+        # allNext= True
+        # objects = {}    ## key: group id , value: [koords]
+        # repeated = set()
+        # images = list(self.buffer.keys())
+        # prevFrameIDs = set()
+
+        # while next and i<len(images):
+        #     shapes = self.buffer[images[i]].get("shapes")
+        #     if not shapes:
+        #         next = False
+        #     else:   ## shapes found in next frame. continue...
+        #         for shape in shapes:
+        #             if shape.group_id is None:
+        #                 next = False
+        #                 break
+        #             else:
+
+        #                 if shape.group_id not in repeated:
+
+        
+    def fillGapVideo(self):
+        if not self.imagePath or self.fileListWidget.count()<=0:
+            return
+
+        if len(self.labelList) == 0:
+            self.errorMessage("Error",self.tr("No annotation found in current image!"))
+            return
+        if self.fileListWidget.currentRow() - 1 < 0:
+            self.errorMessage("Error", self.tr("No previous frames found."))
+            return
+        
+        all_shapes = []
+        is_last = False
+        start_file = self.fileListWidget.currentItem().text()
+
+        all_shapes.append(self.buffer[start_file].get("shapes",[]))
+        
+        startIdx = self.fileListWidget.currentRow()
+        imgIdx = startIdx -1
+        images = []
+        while imgIdx>=0 and not is_last:
+            if self.buffer[self.fileListWidget.item(imgIdx).text()].get("shapes"):
+                all_shapes.append(self.buffer[self.fileListWidget.item(imgIdx).text()].get("shapes"))
+                is_last = True
+            else:
+                images.append(self.fileListWidget.item(imgIdx).text())
+                imgIdx -=1
+        
+        if not is_last:
+            self.errorMessage("Error", "No previous annotated frame found!")
+            return
+        
+        ## startIds > imgIdx , first: imgIdx >> last: startIdx
+        #i= startIdx-imgIdx-1
+        for i in reversed(range(len(images))):
+            new_shapes = []
+            for shape1 in all_shapes[0]:
+                for shape2 in all_shapes[1]:
+                    if shape1.group_id == shape2.group_id and shape1.shape_type == "rectangle" and shape2.shape_type == "rectangle":
+                        new_shape = shape1.copy()
+
+                        x_p0 = shape1.points[0].x() - (shape1.points[0].x() - shape2.points[0].x())*(i + 1)/(len(images))
+                        y_p0 = shape1.points[0].y() - (shape1.points[0].y() - shape2.points[0].y())*(i + 1)/(len(images))
+                        x_p1 = shape1.points[1].x() - (shape1.points[1].x() - shape2.points[1].x())*(i + 1)/(len(images))
+                        y_p1 = shape1.points[1].y() - (shape1.points[1].y() - shape2.points[1].y())*(i + 1)/(len(images))
+                        first_point = QtCore.QPointF(x_p0, y_p0)
+                        second_point = QtCore.QPointF(x_p1, y_p1)
+                        new_shape.points = [first_point, second_point]
+                        new_shapes.append(new_shape)
+
+            
+            self.buffer[images[i]]["shapes"] = new_shapes
+            self.buffer[images[i]]["dirty"] = True
+            i-=1
+        
+        self.actions.saveAll.setEnabled(True)
+        self.actions.saveAllAs.setEnabled(True)
+        #self.loadFile(self.fileListWidget.item(imgIdx).text())
