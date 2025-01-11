@@ -290,11 +290,6 @@ class MainWindow(QtWidgets.QMainWindow):
         yoloMainWidgetLayout = QtWidgets.QVBoxLayout()
         yoloMainWidgetLayout.setContentsMargins(0,10,0,10)
         yoloMainWidgetLayout.setSpacing(0)
-        #
-        #_warningLabel = QtWidgets.QLabel(self.tr("Warning: These methods will overwrite the existing labels!"))
-        #_warningLabel.setStyleSheet("color:red;")
-        #_warningLabel.setAlignment(QtCore.Qt.AlignCenter)
-        #runYolo.defaultWidget().layout().addWidget(_warningLabel)
 
         self.yoloModelLabel = QtWidgets.QLabel("No Model")
         self.yoloModelLabel.setAlignment(QtCore.Qt.AlignCenter)
@@ -569,6 +564,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Save labels to a different file"),
             enabled=False,
         )
+        saveAllAs = action(
+            self.tr("&Save All As"),
+            self.saveAllOutputFilesAs,
+            shortcuts["save_all_as"],
+            "save-as",
+            self.tr("Save all labels to a different file"),
+            enabled=False,
+        )
         saveAuto = action(
             text=self.tr("Save &Automatically"),
             slot=self.setSaveAuto,
@@ -789,6 +792,7 @@ class MainWindow(QtWidgets.QMainWindow):
             save=save,
             saveAll = saveAll,
             saveAs=saveAs,
+            saveAllAs=saveAllAs,
             saveAuto=saveAuto,
             saveWithImageData=saveWithImageData,
             deleteFile=deleteFile,
@@ -821,7 +825,7 @@ class MainWindow(QtWidgets.QMainWindow):
             fitWidth=fitWidth,
             brightnessContrast=brightnessContrast,
             zoomActions=(),
-            fileMenuActions=(open_, opendir, save, saveAll, saveAs, close, quit),
+            fileMenuActions=(open_, opendir, save, saveAll, saveAs, saveAllAs, close, quit),
             tool=(),
             # XXX: need to add some actions here to activate the shortcut
             editMenu=(
@@ -877,7 +881,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 brightnessContrast,
                 loadAnnotationFile,
             ),
-            onShapesPresent=(saveAs, deleteAll, hideAll, showAll, toggleAll),
+            onShapesPresent=(saveAs, saveAllAs, deleteAll, hideAll, showAll, toggleAll),
             extractFrames=extractFrames,
             loadLblFiles=loadLblFiles,
             loadAnnotationFile=loadAnnotationFile,
@@ -953,6 +957,7 @@ class MainWindow(QtWidgets.QMainWindow):
             save,
             saveAll,
             saveAs,
+            saveAllAs,
             saveAuto,
             changeSaveSettings,
             saveWithImageData,
@@ -1193,6 +1198,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggleActions(False)
         self.canvas.setEnabled(False)
         self.actions.saveAs.setEnabled(False)
+        self.actions.saveAllAs.setEnabled(False)
         self.actions.undo.setEnabled(False)
         self.actions.undoLastPoint.setEnabled(False)
         self.actions.delete.setEnabled(False)
@@ -2059,7 +2065,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.fileListWidget.takeItem(row)
                 self.buffer.pop(item.text())
                 if self.filename == item.text():
-                    self.closeFile(False)
+                    self.closeFile(ask=False)
                 # if self.filename == item.text():
                 #     currItemRow = row
                 # else:
@@ -2074,10 +2080,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ## Check for unsaved data. (when dirty is true)
     def mayContinue(self, singleFile=False):
-        #print("May continue?")
-        # if not self.filename:
-        #     return True
-
+        print("May continue?")
         if not self.dirty and not self.allDirty:
             return True
         
@@ -2085,22 +2088,20 @@ class MainWindow(QtWidgets.QMainWindow):
             singleFile = self.fileListWidget.count()<=0
 
         if self.outputFileFormat is None or self.output_dir is None:
-            defPath = osp.dirname(self.imagePath) if self.imagePath else "."
-            if YoloLabelFile.outputLegendPath:
-                legendPath = YoloLabelFile.outputLegendPath
-            else:
-                legendPath = YoloLabelFile.inputlegendPath
-            dialog = SaveDialog(dirPath= defPath, legendPath=legendPath, labels=self.uniqLabelList.labels)
+            defDir = osp.dirname(self.imagePath) if self.imagePath else "."
+            legendPath = YoloLabelFile.outputLegendPath if YoloLabelFile.outputLegendPath else YoloLabelFile.inputlegendPath
+            dialog = SaveDialog(dirPath=defDir, legendPath=legendPath, labels=self.uniqLabelList.labels)
             if dialog.exec_() != QtWidgets.QDialog.Rejected:
-                if dialog.toSave == True:      ## save
+                if dialog.toSave == True:      ## Save
                     self.outputFileFormat = dialog.selectedOption
                     self.output_dir = dialog.selectedDir
                     if self.outputFileFormat == 1:
+                        legend = {}
                         if dialog.outputLegend:
                             legend = dialog.outputLegend
                         elif dialog.selectedLegend:
                             legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
-                        if legend is not None:
+                        if legend:
                             YoloLabelFile.outputLegendPath = dialog.selectedLegend
                             YoloLabelFile.outputLegend = legend
                     if singleFile:
@@ -2109,18 +2110,18 @@ class MainWindow(QtWidgets.QMainWindow):
                     else:
                         #print("save all files")
                         self.saveAllOutputFiles()
-                else:       ## discard
+                else:       ## Discard
                     self.dirty = False
                     self.allDirty = False
 
                 return True
 
-            else:           ## cancel
+            else:           ## Cancel
 
                 return False
             
         else:
-            #print("setting already done")
+            print("setting already done")
             mb = QtWidgets.QMessageBox
             msg = self.tr('Save all annotations to "{}" before closing?').format(self.output_dir)
             answer = mb.question(
@@ -2211,12 +2212,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelFilesDir = None
         self.labelFileType = 0
         self.loadShapesFromFile = False
-        self.actions.saveAuto.setChecked(False)
-        YoloLabelFile.inputLegend = []
-        VideoLabelFile.labelFilePath = None
         self.output_dir = None
         self.outputFileFormat = None
+        self.actions.saveAuto.setChecked(False)
+        YoloLabelFile.inputLegend = []
         YoloLabelFile.outputLegend = {}
+        YoloLabelFile.outputLegendPath = None
+        YoloLabelFile.tempLegend = None
+        YoloLabelFile.generateLegend = False
+        VideoLabelFile.labelFilePath = None
         self.uniqLabelList.clear()
         self.uniqLabelList.labels = []
         self.labelDialog.deleteAllLabels()
@@ -2357,25 +2361,29 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             legendPath = YoloLabelFile.inputlegendPath
 
-        dialog = SaveSettingDialog(self.outputFileFormat, defaultDir, legendPath, self.actions.saveAuto.isChecked(), self.uniqLabelList.labels)
+        dialog = SaveSettingDialog(
+            self.outputFileFormat, defaultDir,
+            legendPath, self.actions.saveAuto.isChecked(),self.uniqLabelList.labels
+        )
 
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             self.outputFileFormat = dialog.selectedOption
             self.output_dir = dialog.selectedDir
             self.actions.saveAuto.setChecked(dialog.saveAuto)
 
-            if self.outputFileFormat == 1:
+            if self.outputFileFormat == 1:      ## check for legend if yolo format selected.
+                legend = {}
                 if dialog.outputLegend:
                     legend = dialog.outputLegend
                 elif dialog.selectedLegend:
                     legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
                 
-                if legend is not None:
+                if legend:
                     YoloLabelFile.outputLegendPath = dialog.selectedLegend
                     YoloLabelFile.outputLegend = legend
                     if self.labelDialog.labelList.count()>0:
                         self.labelDialog.deleteAllLabels()
-                    self.labelDialog.addLabels(legend)
+                    self.labelDialog.addLabels(list(legend.keys()))
 
             self.statusBar().showMessage(
                 self.tr("Annotations will be saved in '%s'")
@@ -2572,7 +2580,7 @@ class MainWindow(QtWidgets.QMainWindow):
         while noErr and i<self.fileListWidget.count():
             image_path = self.fileListWidget.item(i).text()
             #print(i)
-            if self.buffer[image_path].get("dirty", False):
+            if self.buffer[image_path].get("dirty", False) and self.buffer[image_path].get("shapes"):
                 #print("Saving")
                 labelFile = osp.splitext(image_path)[0] + LabelFile.outputSuffixes[self.outputFileFormat]
                 labelFile = osp.join(self.output_dir,osp.basename(labelFile))
@@ -2589,13 +2597,67 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
-        
         self.allDirty = False
         self.dirty = False
         self.actions.save.setEnabled(False)
         self.actions.saveAll.setEnabled(False)
         progress_dialog.close()
+    
+    def saveAllOutputFilesAs(self):
+        if self.output_dir:
+            defaultDir = self.output_dir
+        else:
+            defaultDir = osp.dirname(self.imagePath) if self.imagePath else None
 
+        legendPath = YoloLabelFile.outputLegendPath if YoloLabelFile.outputLegendPath else YoloLabelFile.inputlegendPath
+        
+        dialog = SaveDialog(1, dirPath=defaultDir, legendPath=legendPath, labels=self.uniqLabelList.labels)
+        legend = None
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            if dialog.selectedOption ==1:
+                if dialog.outputLegend:
+                    legend = dialog.outputLegend
+                elif dialog.selectedLegend:
+                    legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
+        else:
+            return
+        
+        progress_dialog = QtWidgets.QProgressDialog("Please wait...", None, 0, 0, self)
+        progress_dialog.setWindowTitle("%s - Save Files" % __appname__)
+        progress_dialog.setCancelButton(None)  # Disable cancel button
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.setWindowFlags(Qt.WindowTitleHint)
+        progress_dialog.show()
+        i=0
+        noErr = True
+        while noErr and i<self.fileListWidget.count():
+            image_path = self.fileListWidget.item(i).text()
+            if self.buffer[image_path].get("shapes"):
+                #print("Saving")
+                labelFile = osp.splitext(image_path)[0] + LabelFile.outputSuffixes[dialog.selectedOption]
+                labelFile = osp.join(dialog.selectedDir,osp.basename(labelFile))
+                if legend:
+                    YoloLabelFile.tempLegend = legend
+
+                if self.saveLabels(labelFile, image_path, False):
+                    self.fileListWidget.item(i).setCheckState(Qt.Checked)
+                else:
+                    noErr = False
+            i+=1
+
+        if not noErr:
+            progress_dialog.close()
+            self.errorMessage(
+                self.tr("Error saving label data"), self.tr("<b>%s</b>") % image_path
+            )
+            return
+
+        self.allDirty = False
+        self.dirty = False
+        self.actions.save.setEnabled(False)
+        self.actions.saveAll.setEnabled(False)
+        progress_dialog.close()
 
     def bufferCurrentStatus(self):
         assert self.imagePath, "Can not Buffer empty image."
@@ -2935,7 +2997,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if legend is not None:
                 YoloLabelFile.inputlegendPath = dialog.getSelectedLegend()
                 YoloLabelFile.inputLegend = list(legend.keys())
-                self.labelDialog.addLabels(YoloLabelFile.legend)
+                self.labelDialog.addLabels(YoloLabelFile.inputLegend)
 
             if self.labelFileType==2:
                 VideoLabelFile.labelFilePath = dialog.getSelectedPath()
@@ -2961,16 +3023,6 @@ class MainWindow(QtWidgets.QMainWindow):
             label_file = osp.splitext(image)[0] + ".json"
             label_file = osp.join(self.labelFilesDir, osp.basename(label_file))
             self.labelDialog.uniqueIds.update(LabelFile.getGroupIds(label_file))
-
-    def addLabelsFromLegend(self, legend:list):
-        self.uniqLabelList.clear()
-        self.labelDialog.deleteAllLabels()
-        for label in legend:
-                # item = self.uniqLabelList.createItemFromLabel(label)
-                # self.uniqLabelList.addItem(item)
-                # rgb = self._get_rgb_by_label(label)
-                # self.uniqLabelList.setItemLabel(item, label, rgb)
-                self.labelDialog.addLabelHistory(label)
 
     def openAnnotationFile(self):
         if not self.noShapes():
@@ -3019,8 +3071,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ## Object detection on single image
     def runYolo(self):
-        # if not self.mayContinue(True):
-        #     return
         if not self.imagePath:
             self.errorMessage("Error",
                               "<p>Image not found.<br>Please load image to make detection.</p>")

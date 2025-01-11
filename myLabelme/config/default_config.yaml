@@ -91,6 +91,7 @@ shortcuts:
   save: Ctrl+S
   save_all: Ctrl+Alt+S
   save_as: Ctrl+Shift+S
+  save_all_as: Ctrl+Alt+A
   save_to: null
   delete_file: Ctrl+Delete
 

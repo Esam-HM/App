@@ -159,7 +159,7 @@ class SaveSettingDialog(QDialog):
         return self.saveAuto
     
     def generateLegend(self):
-        dialog = GenerateLegendDialog(self.labels, self.selectedDir)
+        dialog = GenerateLegendDialog(self.labels, self.selectedDir, self.outputLegend)
 
         if dialog.exec_() == QDialog.Accepted:
             self.outputLegend = {}
@@ -259,4 +259,5 @@ class SaveSettingDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.formatSelectionChanged()
         self.isDirPathEmpty()

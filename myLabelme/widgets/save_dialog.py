@@ -6,25 +6,35 @@ from . import GenerateLegendDialog
 
 
 class SaveDialog(QDialog):
-    def __init__(self,selectedOption:int=0, dirPath:str=None, legendPath:str=None, labels:list=None):
+    def __init__(self,
+                 dialogType:int=0,
+                 selectedOption:int=0,
+                 dirPath:str=None,
+                 legendPath:str=None,
+                 labels:list=None,
+    ):
         super().__init__()
-        self.selectedOption = selectedOption if selectedOption else 0
+        self.selectedOption = selectedOption
         self.selectedDir = dirPath
         self.selectedLegend = legendPath
         self.toSave = None
         self.labels = labels
         self.outputLegend = {}
-        self.setWindowTitle("%s - Save Annotations" % __appname__)
+        self.setWindowTitle(" %s - Save Annotations" % __appname__)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(400,250)
         self.setMaximumSize(800,600)
-        self.initUI()
-        self.adjustSize()
+        ## [title, discardBtnVisible]
+        if dialogType == 0:
+            titleTxt = "Save your annotations before closing?"
+            discardBtnVisibilty = True
+        else:
+            titleTxt = "How to save your annotations?"
+            discardBtnVisibilty = False
 
-    def initUI(self):
         options = ["Labelme format (.json)", "YOLO format (.txt)"]
 
-        title = QLabel("Save Your Annotations Before Closing?")
+        title = QLabel(titleTxt)
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-weight: bold; font-size: 10pt;")
 
@@ -76,12 +86,12 @@ class SaveDialog(QDialog):
         self.legendPathErrorLbl.setStyleSheet("color: #f00;")
         self.legendPathErrorLbl.setContentsMargins(0,0,0,0)
         self.legendPathErrorLbl.setVisible(False)
-        ## Left line
+        ## Left Line
         leftLine = QFrame()
         leftLine.setFrameShape(QFrame.HLine)
         leftLine.setFrameShadow(QFrame.Sunken)
         orLbl = QLabel("or")
-        #orLbl.setStyleSheet("padding: 0 5px;")
+        ## Right Line
         rightLine = QFrame()
         rightLine.setFrameShape(QFrame.HLine)
         rightLine.setFrameShadow(QFrame.Sunken)
@@ -111,12 +121,13 @@ class SaveDialog(QDialog):
 
         btnsLayout = QHBoxLayout()
         self.saveBtn = QPushButton("Save")
-        discardBtn = QPushButton("Discard")
-        cancelBtn = QPushButton("Cancel")
         btnsLayout.addWidget(self.saveBtn)
-        btnsLayout.addWidget(discardBtn)
+        if discardBtnVisibilty:
+            discardBtn = QPushButton("Discard")
+            discardBtn.clicked.connect(self.discardBtnClicked)
+            btnsLayout.addWidget(discardBtn)
+        cancelBtn = QPushButton("Cancel")
         btnsLayout.addWidget(cancelBtn)
-        
 
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(title)
@@ -125,31 +136,25 @@ class SaveDialog(QDialog):
         mainLayout.addStretch()
         mainLayout.addWidget(lbl2)
         mainLayout.addWidget(widget2)
+        mainLayout.addStretch()
         mainLayout.addWidget(self.widget3)
+        mainLayout.addStretch()
         mainLayout.addLayout(btnsLayout)
+
         self.setLayout(mainLayout)
 
-
         self.saveBtn.clicked.connect(self.saveBtnClicked)
-        discardBtn.clicked.connect(self.discardBtnClicked)
         cancelBtn.clicked.connect(self.reject)
         generateBtn.clicked.connect(self.generateLegend)
         browseDirBtn.clicked.connect(self.selectOutputDir)
         browseLegendBtn.clicked.connect(self.selectLegendFile)
         self.dirpathEditTxt.textChanged.connect(self.isDirPathEmpty)
         self.comboBox.currentIndexChanged.connect(self.formatSelectionChanged)
-
-    def getCurrentOption(self):
-        return self.selectedOption
-    
-    def getSelectedDir(self):
-        return self.selectedDir
-    
-    def getSelectedLegend(self):
-        return self.selectedLegend
+        
+        self.adjustSize()
     
     def generateLegend(self):
-        dialog = GenerateLegendDialog(self.labels, self.selectedDir)
+        dialog = GenerateLegendDialog(self.labels, self.selectedDir, self.outputLegend)
 
         if dialog.exec_() == QDialog.Accepted:
             self.outputLegend = {}
@@ -250,11 +255,5 @@ class SaveDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.formatSelectionChanged()
         self.isDirPathEmpty()
-
-
-    # def isFieldsEmpty(self):
-    #     if self.widget3.isVisible():
-    #         self.saveBtn.setEnabled(self.legendPathEditTxt.text()!="" and self.dirpathEditTxt.text!="")
-    #     else:
-    #         self.saveBtn.setEnabled(self.dirpathEditTxt.text!="")
