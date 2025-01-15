@@ -11,6 +11,7 @@ from . import QT4
 from . import __version__
 from . import utils
 from .logger import logger
+from abc import ABC, abstractmethod
 
 PIL.Image.MAX_IMAGE_PIXELS = None
 
@@ -27,47 +28,72 @@ def open(name, mode):
     return
 
 
+def load_image_file(filename):
+    try:
+        image_pil = PIL.Image.open(filename)
+    except IOError:
+        logger.error("Failed opening image file: {}".format(filename))
+        return
+
+    # apply orientation to image according to exif
+    image_pil = utils.apply_exif_orientation(image_pil)
+
+    with io.BytesIO() as f:
+        ext = osp.splitext(filename)[1].lower()
+        if PY2 and QT4:
+            format = "PNG"
+        elif ext in [".jpg", ".jpeg"]:
+            format = "JPEG"
+        else:
+            format = "PNG"
+        image_pil.save(f, format=format)
+        f.seek(0)
+        return f.read()
+
+
 class LabelFileError(Exception):
     pass
 
-
-class LabelFile(object):
-    suffix = ".json"
+class LabelFile(ABC):
     outputFormats = {"Labelme": ".json", "YOLO": ".txt"}
     outputSuffixes = {0: ".json", 1: ".txt"}
 
-    def __init__(self, filename=None):
+    def __init__(self):
+        self.filename = None
         self.shapes = []
+        self.imageWidth = None
+        self.imageHeight = None
+
+    @abstractmethod
+    def load(self,filename:str):
+        pass
+
+    @abstractmethod
+    def save(self,shapes,imageSize):
+        pass
+
+    @staticmethod
+    def is_label_file(filename, suffixId):
+        return osp.splitext(filename)[1].lower() == LabelFile.outputSuffixes[suffixId]
+    
+    @staticmethod
+    def getImageSize(image_path):
+        img = PIL.Image.open(image_path)
+        img = utils.apply_exif_orientation(img)
+        return img.size
+    
+    
+
+class LabelmeLabelFile(LabelFile):
+    suffix = ".json"
+
+    def __init__(self, filename=None):
+        super().__init__()
         self.imagePath = None
         self.imageData = None
         if filename is not None:
             self.load(filename)
         self.filename = filename
-        self.imageHeight = None
-        self.imageWidth = None
-
-    @staticmethod
-    def load_image_file(filename):
-        try:
-            image_pil = PIL.Image.open(filename)
-        except IOError:
-            logger.error("Failed opening image file: {}".format(filename))
-            return
-
-        # apply orientation to image according to exif
-        image_pil = utils.apply_exif_orientation(image_pil)
-
-        with io.BytesIO() as f:
-            ext = osp.splitext(filename)[1].lower()
-            if PY2 and QT4:
-                format = "PNG"
-            elif ext in [".jpg", ".jpeg"]:
-                format = "JPEG"
-            else:
-                format = "PNG"
-            image_pil.save(f, format=format)
-            f.seek(0)
-            return f.read()
 
     def load(self, filename):
         keys = [
@@ -99,7 +125,7 @@ class LabelFile(object):
             else:
                 # relative path from label file to relative path from cwd
                 imagePath = osp.join(osp.dirname(filename), data["imagePath"])
-                imageData = self.load_image_file(imagePath)
+                imageData = load_image_file(imagePath)
             flags = data.get("flags") or {}
             imagePath = data["imagePath"]
             self._check_image_height_and_width(
@@ -135,6 +161,8 @@ class LabelFile(object):
         self.imageData = imageData
         self.filename = filename
         self.otherData = otherData
+        self.imageHeight = data.get("imageHeight")
+        self.imageWidth = data.get("imageWidth")
 
     @staticmethod
     def _check_image_height_and_width(imageData, imageHeight, imageWidth):
@@ -153,36 +181,26 @@ class LabelFile(object):
             imageWidth = img_arr.shape[1]
         return imageHeight, imageWidth
 
-    def save(
-        self,
-        filename,
-        shapes,
-        imagePath,
-        imageHeight,
-        imageWidth,
-        imageData=None,
-        otherData=None,
-        flags=None,
-    ):
-        if imageData is not None:
-            imageData = base64.b64encode(imageData).decode("utf-8")
+    def save(self, filename, shapes,imageWidth,imageHeight):
+        if self.imageData is not None:
+            self.imageData = base64.b64encode(self.imageData).decode("utf-8")
             imageHeight, imageWidth = self._check_image_height_and_width(
-                imageData, imageHeight, imageWidth
+                self.imageData, imageHeight, imageWidth
             )
-        if otherData is None:
-            otherData = {}
-        if flags is None:
-            flags = {}
+        if self.otherData is None:
+            self.otherData = {}
+        if self.flags is None:
+            self.flags = {}
         data = dict(
             version=__version__,
-            flags=flags,
+            flags=self.flags,
             shapes=shapes,
-            imagePath=imagePath,
-            imageData=imageData,
+            imagePath=self.imagePath,
+            imageData=self.imageData,
             imageHeight=imageHeight,
             imageWidth=imageWidth,
         )
-        for key, value in otherData.items():
+        for key, value in self.otherData.items():
             assert key not in data
             data[key] = value
         try:
@@ -191,51 +209,28 @@ class LabelFile(object):
             self.filename = filename
         except Exception as e:
             raise LabelFileError(e)
-
-    @staticmethod
-    def is_label_file(filename, suffixId):
-        return osp.splitext(filename)[1].lower() == LabelFile.outputSuffixes[suffixId]
-
-    @staticmethod
-    def getSizes(image_path):
-        img = PIL.Image.open(image_path)
-        img = utils.apply_exif_orientation(img)
-        return img.size
-
-    def getImageShapes(self):
-        imgArr = utils.img_data_to_arr(self.imageData)
-
-        return imgArr.shape[:2]
-
-    @staticmethod
-    def getGroupIds(filename):
+    
+    def getGroupIds(self):
         ids = []
-        try:
-            with open(filename, "r") as f:
-                data = json.load(f)
+        for s in self.shapes:
+            group_id = s.get("group_id")
+            if group_id is not None:
+                ids.append(group_id)
 
-                for s in data["shapes"]:
-                    group_id=s.get("group_id")
-                    if group_id is not None:
-                        ids.append(group_id)
-
-            return ids
-        except Exception as e:
-            return []
+        return ids
 
 
 ## Yolo Format Label file
 class YoloLabelFile(LabelFile):
-    #LabelFile.suffix = ".txt"
     tempLegend = None
     inputlegendPath = None
     outputLegendPath = None
     inputLegend = []            ## Classes stored in indexes according to their ids
     outputLegend = {}           ## key: class name, value: id
     generateLegend = False
-    #selfLegend = {}             ## key: classname, value: id (generated by app)
     def __init__(self):
-        super().__init__(None)
+        self.shapes = []
+        super().__init__()
 
     def load(self, filename:str):
         with open(filename, "r") as f:
@@ -256,12 +251,8 @@ class YoloLabelFile(LabelFile):
                 else:
                     shape["label"] = YoloLabelFile.inputLegend[pp[0]] if len(YoloLabelFile.inputLegend)> pp[0] else str(pp[0])
                 
-                shape["description"] = None
                 shape["shape_type"] = "rectangle"
-                shape["flags"] = {}
-                shape["mask"] = None
                 shape["points"] = []
-                shape["other_data"] = {}
 
                 for x,y in pp[1]:
                     shape["points"].append([x,y])
@@ -269,8 +260,7 @@ class YoloLabelFile(LabelFile):
                 self.shapes.append(shape)
 
         YoloLabelFile.tempLegend = None
-        self.filename = filename
-        self.flags = None
+        #self.filename = filename
 
 
     def formatYoloData(self, data:list):
@@ -293,61 +283,6 @@ class YoloLabelFile(LabelFile):
 
         return classID, [(x1,y1),(x2,y2)]
 
-
-
-    # def loadTxtFileData(self, filename):
-    #     with open(filename, "r") as f:
-    #         lines = f.readlines()
-    #     pp = {}
-
-    #     for line in lines:
-    #         data = line.strip().split()
-    #         if data and len(data)==5:
-    #             try:
-    #                 classID = int(data[0])
-    #                 x_center = float(data[1])*self.imageWidth
-    #                 y_center = float(data[2])*self.imageHeight
-    #                 box_width = float(data[3])*self.imageWidth
-    #                 box_height = float(data[4])*self.imageHeight
-    #             except ValueError:
-    #                 logger.error("Error reading %s file" % filename)
-    #                 return {}
-
-    #             x1 = int(x_center-box_width/2)
-    #             y1 = int(y_center-box_height/2)
-    #             x2 = int(x_center+box_width/2)
-    #             y2 = int(y_center+box_height/2)
-
-    #             if pp.get(classID) is None:
-    #                 pp[classID] = []
-    #             pp[classID].append([(x1,y1),(x2,y2)])
-
-    #     return pp
-
-
-    # def loadTxtFile(self, filename:str):
-    #     data = self.loadTxtFileData(filename)
-    #     ## convert to application format
-    #     for key, values in data.items():
-    #         for value in values:
-    #             shape = {}
-    #             shape["group_id"] = None
-    #             shape["label"] = YoloLabelFile.legend[key] if len(YoloLabelFile.legend)> key else str(key)
-    #             shape["description"] = None
-    #             shape["shape_type"] = "rectangle"
-    #             shape["flags"] = {}
-    #             shape["mask"] = None
-    #             shape["points"] = []
-    #             shape["other_data"] = {}
-
-    #             for x,y in value:
-    #                 shape["points"].append([x,y])
-
-    #             self.shapes.append(shape)
-
-    #     self.filename = filename
-    #     self.flags = None
-
     @staticmethod
     def loadLegendFile(filepath:str=None):
         if not filepath:
@@ -367,18 +302,8 @@ class YoloLabelFile(LabelFile):
             )
             return
 
-    ## Override
-    def save(self,filename, shapes, imageSize):
+    def save(self,filename, shapes, imageWidth, imageHeight):
         ## class id, x_center, y_center, box width, box height,
-        # shape_keys = [
-        #     "label",
-        #     "points",
-        #     "group_id",
-        #     "shape_type",
-        #     "flags",
-        #     "description",
-        #     "mask",
-        # ]
         print("saving")
         lines = []
         for shape in shapes:
@@ -393,10 +318,10 @@ class YoloLabelFile(LabelFile):
                 height = abs(y2-y1)
 
                 # Normalize
-                x_center = str(x_center/imageSize[0])
-                y_center = str(y_center/imageSize[1])
-                width = str(width/imageSize[0])
-                height = str(height/imageSize[1])
+                x_center = str(x_center/imageWidth)
+                y_center = str(y_center/imageHeight)
+                width = str(width/imageWidth)
+                height = str(height/imageHeight)
 
                 if YoloLabelFile.tempLegend is not None:
                     classId = str(YoloLabelFile.tempLegend.get(shape["label"]))
@@ -437,20 +362,6 @@ class YoloLabelFile(LabelFile):
         
         YoloLabelFile.generateLegend = False
 
-    # def getClassID(self, label:str):
-    #     if YoloLabelFile.outputLegend:      ## if output legend provided
-    #         classId = YoloLabelFile.outputLegend.get(label.lower())
-    #         if classId is None:        ## class not found in output legend
-    #             classId = self.getNewClassID(YoloLabelFile.outputLegend)
-    #             YoloLabelFile.outputLegend[label.lower()] = classId
-    #     else:           ## no output legend. make ids by self.
-    #         classId = YoloLabelFile.selfLegend.get(label.lower())
-    #         if classId is None:
-    #             classId = self.getNewClassID(YoloLabelFile.selfLegend)
-    #             YoloLabelFile.selfLegend[label.lower()] = classId
-
-    #     return classId
-
     def getNewClassID(self, legend:dict):
         YoloLabelFile.generateLegend = True
         ids = list(legend.values())
@@ -466,15 +377,14 @@ class YoloLabelFile(LabelFile):
         return maxId+1
     
 
-
 ## Label Studio Format Label File.
 class VideoLabelFile(LabelFile):
     labelFilePath = None
     objectsCount = None
     def __init__(self):
-        super().__init__(None)
-
-    def loadVideoLabelFile(self, frameIdx:int, framesCount:int):
+        super().__init__()
+        pass
+    def load(self, filename:str=None, frameIdx:int=0, framesCount:int=0):
         try:
             with open(VideoLabelFile.labelFilePath, "r") as f:
                 data = json.load(f)
@@ -495,7 +405,6 @@ class VideoLabelFile(LabelFile):
             # for i in range(len(totalObjects)):
             #     ids[i] = totalObjects[i]["id"]
 
-            imgShape = self.getImageShapes()
             for i,obj in enumerate(totalObjects):
                 frames = obj["value"]["sequence"]
                 idx = self.getFrameIdx(frames,frameNo)
@@ -503,22 +412,16 @@ class VideoLabelFile(LabelFile):
                     shape = {}
                     shape["group_id"] = i
                     shape["label"] = obj["value"]["labels"][0]
-                    shape["description"] = None
                     shape["shape_type"] = "rectangle"
-                    shape["flags"] = {}
-                    shape["mask"] = None
                     shape["points"] = []
-                    shape["other_data"] = {}
 
-                    koords = self.getVideoObjectKoords(frames[idx], imgShape)
+                    koords = self.getVideoObjectKoords(frames[idx])
 
                     for x,y in koords:
                         shape["points"].append([x,y])
 
                     self.shapes.append(shape)
 
-            self.filename = VideoLabelFile.labelFilePath
-            self.flags = None
         except Exception as e:
             logger.error(e)
             raise LabelFileError(e)
@@ -536,11 +439,11 @@ class VideoLabelFile(LabelFile):
                 high = mid - 1
         return -1
 
-    def getVideoObjectKoords(self, koords, imgShape):
-        x = int(imgShape[1]*koords["x"]/100)
-        y = int(imgShape[0]*koords["y"]/100)
-        width = int(imgShape[1]*koords["width"]/100)
-        height = int(imgShape[0]*koords["height"]/100)
+    def getVideoObjectKoords(self, koords):
+        x = int(self.imageWidth*koords["x"]/100)
+        y = int(self.imageHeight*koords["y"]/100)
+        width = int(self.imageWidth*koords["width"]/100)
+        height = int(self.imageHeight*koords["height"]/100)
 
         return [[x,y], [x+width,y+height]]
 
@@ -554,3 +457,6 @@ class VideoLabelFile(LabelFile):
             return VideoLabelFile.objectsCount
         except:
             return None
+        
+    def save():
+        pass

@@ -6,11 +6,11 @@ from os import path as osp
 
 
 class LoadLabelFilesDialog(QDialog):
-    def __init__(self,selectedOption:int=0, dirPath:str=None, videoLblPath:str=None):
+    def __init__(self,selectedOption:int=0, dirPath:str=None, videoLblPath:str=None, legendPath:str=None):
         super().__init__()
         self.selectedOption = selectedOption
         self.selectedPath = dirPath
-        self.selectedLegendFile = None
+        self.selectedLegendFile = legendPath
         self.setWindowTitle("%s - Load Label Files" % __appname__)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(400,200)
@@ -97,6 +97,8 @@ class LoadLabelFilesDialog(QDialog):
         hLayout4 = QHBoxLayout()
         self.legendPathEditTxt = QLineEdit()
         self.legendPathEditTxt.setPlaceholderText("Your Legend File Path (*Optional)")
+        if self.selectedLegendFile:
+            self.legendPathEditTxt.setText(self.selectedLegendFile)
         browseLegendBtn = QPushButton("Browse")
         self.legendPathErrorLbl = QLabel()
         self.legendPathErrorLbl.setStyleSheet("color: #f00;")
