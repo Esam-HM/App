@@ -324,8 +324,10 @@ class YoloLabelFile(LabelFile):
                 height = str(height/imageHeight)
 
                 if YoloLabelFile.tempLegend is not None:
+                    print("From temp legend")
                     classId = str(YoloLabelFile.tempLegend.get(shape["label"]))
                 else:
+                    print("From output legend")
                     classId = str(self.getClassID(shape["label"]))
                 if classId is None:
                     classId = shape["label"]
@@ -345,12 +347,13 @@ class YoloLabelFile(LabelFile):
     def getClassID(self, label:str):
         classId = YoloLabelFile.outputLegend.get(label.lower())
         if classId is None:        ## class not found in output legend
+            print(f"New class ID for {label}")
             classId = self.getNewClassID(YoloLabelFile.outputLegend)
             YoloLabelFile.outputLegend[label.lower()] = classId
         return classId
     
     def generateLegendFile(self, filename):
-        classes = sorted(YoloLabelFile.outputLegend.keys())
+        classes = YoloLabelFile.outputLegend.keys()
         try:
             with open(filename, "w") as f:
                 for key in classes:

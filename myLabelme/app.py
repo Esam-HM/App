@@ -64,6 +64,7 @@ class MainWindow(QtWidgets.QMainWindow):
             Qt.Horizontal: {},
             Qt.Vertical: {},
         }  # key=filename, value=scroll_value
+        self.multipleFilesLoaded = False
         self.loadShapesFromFile=False
         self.buffer = {}  ## key=imagePath, value={"shapes": [], "flags": {}, "image_size": [width, height], "dirty": bool}
         self.labelFileType = 0  ## 0: labelme, 1: yolo format, 2: video label studio format.
@@ -409,6 +410,7 @@ class MainWindow(QtWidgets.QMainWindow):
             shortcut=shortcuts["save_to"],
             icon = "save_settings",
             tip = self.tr("Change output files format and where to save."),
+            enabled=False,
         )
         close = action(
             "&Close",
@@ -582,7 +584,7 @@ class MainWindow(QtWidgets.QMainWindow):
             slot=self.setSaveAuto,
             tip=self.tr("Save automatically"),
             checkable=True,
-            enabled=True,
+            enabled=False,
         )
         saveWithImageData = action(
             text="Save With Image Data",
@@ -906,7 +908,8 @@ class MainWindow(QtWidgets.QMainWindow):
             loadAnnotationFile=loadAnnotationFile,
             selectAiModelFile=selectAiModelFile,
             trajectory = trajectory,
-            onDirLoad = (fillGapVideo, trajectory, loadLblFiles, openNextImg, openPrevImg,),
+            onDirLoad = (fillGapVideo, trajectory, loadLblFiles, openNextImg, openPrevImg, changeSaveSettings, saveAuto),
+            onAnyLoadActive = (loadLblFiles, changeSaveSettings, saveAuto),
         )
 
 
@@ -1160,6 +1163,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ])
 
         self.filename = None
+        self.fileListWidget.clear()
         self.resetFileListWidget(load=False)
 
         for file in imageFiles:
@@ -1209,8 +1213,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.resetApplicationState()
             if self.fileListWidget.count()>0:
                 self.fileListWidget.clear()
-                # self.actions.openNextImg.setEnabled(False)
-                # self.actions.openPrevImg.setEnabled(False)
+                self.actions.openNextImg.setEnabled(False)
+                self.actions.openPrevImg.setEnabled(False)
             self.loadFile(selectedFilePath)
 
     ## Closing opened file.
@@ -1229,6 +1233,8 @@ class MainWindow(QtWidgets.QMainWindow):
         for action in self.actions.onShapesPresent:
             action.setEnabled(False)
         self.toggleRunYoloBtns()
+        if self.fileListWidget.count()<=0:
+            self.toggleLoadActions(False)
         return True
 
     ## Delete currently opened image's label file.
@@ -1377,7 +1383,7 @@ class MainWindow(QtWidgets.QMainWindow):
             #     self.setClean()
 
         else:
-            print("Not loaded from buffer")
+            print("Not found in buffer")
             self.buffer[filename]["image_size"] = [image.width(), image.height()]
         
         self.loadFlags(flags)   ## load to flags widget
@@ -1434,6 +1440,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addRecentFile(self.filename)
         self.toggleActions(True)
         self.toggleRunYoloBtns()
+        self.toggleLoadActions(True)
         #self.canvas.setFocus()
         self.status(str(self.tr("Loaded %s")) % osp.basename(str(filename)))
         return True
@@ -1444,8 +1451,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.resetApplicationState()
             if self.fileListWidget.count()>0:
                 self.fileListWidget.clear()
-                # self.actions.openNextImg.setEnabled(False)
-                # self.actions.openPrevImg.setEnabled(False)
+                self.actions.openNextImg.setEnabled(False)
+                self.actions.openPrevImg.setEnabled(False)
             self.loadFile(filename)
 
     ## Add every opened file to recent files.
@@ -1663,7 +1670,7 @@ class MainWindow(QtWidgets.QMainWindow):
             flags = shape.get("flags",{})
             description = shape.get("description", "")
             group_id = shape.get("group_id")
-            other_data = shape.get("other_data")
+            other_data = shape.get("other_data",{})
             
             if not points:
                 # skip point-empty shape
@@ -1784,7 +1791,6 @@ class MainWindow(QtWidgets.QMainWindow):
     ###############   Flags    ###################
 
     def loadFlags(self, flags):
-        print("Here")
         self.flag_widget.clear()
         for key, flag in flags.items():
             item = QtWidgets.QListWidgetItem(key)
@@ -1912,6 +1918,9 @@ class MainWindow(QtWidgets.QMainWindow):
     ################## File list Widget Functions  ################
 
     def fileSearchChanged(self):
+        if not self.multipleFilesLoaded:
+            return
+        
         self.fileListWidget.clear()
         filenames = self.buffer.keys()
         text = self.fileSearch.text()
@@ -2025,12 +2034,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self.resetFileListWidget()
 
     def fileListChanged(self):
+        if self.fileSearch.hasFocus():
+            return
         if self.fileListWidget.count() == 0:
             for action in self.actions.onDirLoad:
                 action.setEnabled(False)
+            self.multipleFilesLoaded = False
         else:
             for action in self.actions.onDirLoad:
                 action.setEnabled(True)
+            self.multipleFilesLoaded = True
+
 
     ##############  utils  #############
 
@@ -2164,6 +2178,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.buffer[file] = {}
         else:
             self.buffer.clear()
+            self.multipleFilesLoaded = False
 
         self.labelFilesDir = None
         self.labelFileType = 0
@@ -2172,10 +2187,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.outputFileFormat = None
         YoloLabelFile.inputLegend = []
         YoloLabelFile.outputLegend = {}
-        #YoloLabelFile.outputLegendPath = None
+        YoloLabelFile.outputLegendPath = None
         YoloLabelFile.tempLegend = None
         YoloLabelFile.generateLegend = False
-        #VideoLabelFile.labelFilePath = None
+        VideoLabelFile.labelFilePath = None
         self.uniqLabelList.clear()
         self.uniqLabelList.labels = []
         self.labelDialog.deleteAllLabels()
@@ -2190,6 +2205,10 @@ class MainWindow(QtWidgets.QMainWindow):
             z.setEnabled(value)
         for action in self.actions.onLoadActive:
             action.setEnabled(value)
+
+    def toggleLoadActions(self, value=True):
+        for z in self.actions.onAnyLoadActive:
+            z.setEnabled(value)
 
     ## Save image data in label file.
     def enableSaveImageWithData(self, enabled):
@@ -2544,11 +2563,11 @@ class MainWindow(QtWidgets.QMainWindow):
             if not self.setSaveSettings():
                 return
         
-        progress_dialog = QtWidgets.QProgressDialog("Please wait...", "Cancel", 0, 0, self)
+        progress_dialog = QtWidgets.QProgressDialog("Saving files. Please wait...", "Cancel", 0, self.fileListWidget.count(), self)
         progress_dialog.setWindowTitle("%s - Save Files" % __appname__)
+        progress_dialog.setWindowFlags(Qt.WindowTitleHint)
         progress_dialog.setWindowModality(Qt.WindowModal)
         progress_dialog.setMinimumDuration(0)
-        progress_dialog.setWindowFlags(Qt.WindowTitleHint)
         i=0
         noErr = True
         canceled = False
@@ -2616,17 +2635,16 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             return
         
-        progress_dialog = QtWidgets.QProgressDialog("Please wait...", "Cancel", 0, 0, self)
+        progress_dialog = QtWidgets.QProgressDialog("Saving files. Please wait...", "Cancel", 0, self.fileListWidget.count(), self)
         progress_dialog.setWindowTitle("%s - Save Files" % __appname__)
-        #progress_dialog.setCancelButton(None)  # Disable cancel button
+        progress_dialog.setWindowFlags(Qt.WindowTitleHint)
         progress_dialog.setWindowModality(Qt.WindowModal)
         progress_dialog.setMinimumDuration(0)
-        progress_dialog.setWindowFlags(Qt.WindowTitleHint)
-        #progress_dialog.show()
         i=0
         noErr = True
         canceled = False
         while noErr and i<self.fileListWidget.count():
+            progress_dialog.setValue(i)
             if progress_dialog.wasCanceled():
                 canceled = True
                 break
@@ -2667,7 +2685,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dirty = False
         self.actions.save.setEnabled(False)
         self.actions.saveAll.setEnabled(False)
-        progress_dialog.close()
+        progress_dialog.setValue(self.fileListWidget.count())
+        #progress_dialog.close()
 
     def bufferCurrentStatus(self):
         assert self.imagePath, "Can not Buffer empty image."
@@ -3005,6 +3024,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         % (e, label_file),
                     )
                     self.status(self.tr("Error reading %s") % label_file)
+                else:
+                    logger.error("Error happened reading %s" % label_file)
                 return
             
             self.labelDialog.uniqueIds.update(labelFile.getGroupIds())
@@ -3033,6 +3054,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.errorMessage("Error Reading Label File",
                                   "Make sure the label file '%s' has a correct Yolo format." % label_file
                     )
+                else:
+                    logger.error("Error happened reading %s" % label_file)
                 return
             
             self.buffer[imagePath]["shapes"] = self.loadLabels(labelFile.shapes, False)
@@ -3058,7 +3081,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.errorMessage("Error Reading Label File",
                                   "Make sure the video label file '%s' has a correct format." % VideoLabelFile.labelFilePath
                     )
-            
+                else:
+                    logger.error("Error happened reading %s" % VideoLabelFile.labelFilePath)
+                
+                return
+                
             self.buffer[imagePath]["shapes"] = self.loadLabels(labelFile.shapes,False)
             self.buffer[imagePath]["dirty"] = False
         
@@ -3101,6 +3128,8 @@ class MainWindow(QtWidgets.QMainWindow):
             progress_dialog.setValue(i + 1)
             self.labelFileLoaders[self.labelFileType](image,None,i,False)
         progress_dialog.setValue(len(images))
+        if self.fileListWidget.count()>0:
+            self.toggleAllBtns()
         if self.imagePath:
             self.loadFile(self.imagePath)
 
