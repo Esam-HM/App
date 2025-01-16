@@ -751,7 +751,7 @@ class MainWindow(QtWidgets.QMainWindow):
         setBoxSize = action(
             self.tr("&Set Box Size"),
             self.setBoxSize,
-            None,
+            shortcuts["set_box_size"],
             "edit_icon",
             self.tr("Set or change box width and height."),
         )
@@ -798,6 +798,14 @@ class MainWindow(QtWidgets.QMainWindow):
             checkable=True,
             checked=False,
         )
+        setShapeSizeToBox = action(
+            self.tr("Set Selected Rectangle Size For Box"),
+            self.setShapeSizeToBox,
+            None,
+            "edit_icon",
+            self.tr("Set the selected rectangle size as fixed box size"),
+            enabled=False,
+        )
 
         # Store actions for further handling.
         self.actions = utils.struct(
@@ -842,6 +850,7 @@ class MainWindow(QtWidgets.QMainWindow):
             fitWidth=fitWidth,
             brightnessContrast=brightnessContrast,
             fillGapVideo=fillGapVideo,
+            setShapeSizeToBox=setShapeSizeToBox,
             zoomActions=(),
             fileMenuActions=(open_, opendir, save, saveAll, saveAs, saveAllAs, close, quit),
             tool=(),
@@ -886,6 +895,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 undo,
                 undoLastPoint,
                 removePoint,
+                setShapeSizeToBox,
             ),
             onLoadActive=(
                 close,
@@ -902,7 +912,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 brightnessContrast,
                 loadAnnotationFile,
             ),
-            onShapesPresent=(saveAs, deleteAll, hideAll, showAll, toggleAll),
+            onShapesPresent=(saveAs, deleteAll, hideAll, showAll, toggleAll, setShapeSizeToBox),
             extractFrames=extractFrames,
             loadLblFiles=loadLblFiles,
             loadAnnotationFile=loadAnnotationFile,
@@ -2537,6 +2547,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions.saveAll.setEnabled(not clean)
         self.actions.saveAllAs.setEnabled(not noShape)
         self.actions.trajectory.setEnabled(not noShape)
+        if self.actions.trajectory.isChecked():
+            self.actions.trajectory.setChecked(Qt.Unchecked)
         self.allDirty = True if not clean else False
     
     def allNoShapes(self):
@@ -2878,6 +2890,39 @@ class MainWindow(QtWidgets.QMainWindow):
             return True
         
         return False
+    
+    def setShapeSizeToBox(self):
+        if not self.canvas.selectedShapes:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                "No selected rectangle. Please select a rectangle shape and try again.",
+            )
+            return
+
+        def getRectangleSize(points:list):
+            x1, y1 = points[0].x(), points[0].y()
+            x2, y2 = points[1].x(), points[1].y()
+
+            return int(abs(x1-x2)), int(abs(y1-y2))
+        
+        shape = self.canvas.selectedShapes[-1]
+
+        if shape.shape_type !="rectangle":
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                "You can select only rectangle shapes. Please select rectangle shape and try again",
+            )
+            return
+        
+        if not shape.points:
+            return
+
+        #print(shape.label)
+        shapeSize = getRectangleSize(shape.points)
+        self.canvas.boxWidth = shapeSize[0]
+        self.canvas.boxHeight = shapeSize[1]
 
     ############### Zoom Funtions ###############
 
@@ -3391,16 +3436,19 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if self.fileListWidget.count() <= 0:
             self.errorMessage("Error","Images list is empty. Load images and annotations and try again.")
+            self.actions.trajectory.setChecked(Qt.Unchecked)
             return
 
         if self.fileListWidget.currentRow() - 1 < 0:
             self.errorMessage("Error","No previous frames found")
+            self.actions.trajectory.setChecked(Qt.Unchecked)
             return
 
         currImgIdx = self.fileListWidget.currentRow()
 
         if not self.imagePath or currImgIdx ==-1:
             self.errorMessage("Error","No frame is selected. Please select frame from list and try again")
+            self.actions.trajectory.setChecked(Qt.Unchecked)
             return 
 
         currImg = self.fileListWidget.currentItem().text()
@@ -3408,6 +3456,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if not currShapes:
             self.errorMessage("Error","No annotations found in the current image.")
+            self.actions.trajectory.setChecked(Qt.Unchecked)
             return
 
         # Load the current image
@@ -3439,11 +3488,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 rects[shape.group_id] = [[x1,y1,x2,y2]]
 
         ## Traverse the previous frames to extract trajectory points
+        emptyFrame = False
         for i in range(currImgIdx):    
             prevShapes = self.buffer[self.fileListWidget.item(i).text()].get("shapes")
             ## Check if frame has shapes.
             if not prevShapes:
-                ids.clear()
+                #ids.clear()
+                emptyFrame = True
                 break
             for shape in prevShapes:
                 ## Check if shape.group_id found in currImg.
@@ -3453,9 +3504,20 @@ class MainWindow(QtWidgets.QMainWindow):
                             int((shape.points[0].y() + shape.points[1].y()) / 2)]
                     ids[shape.group_id][i] = point
 
-        if not ids:
+        if emptyFrame:
             self.errorMessage("Error","Non annotated frame found. %s" % self.fileListWidget.item(i).text())
             painter.end()
+            self.actions.trajectory.setChecked(Qt.Unchecked)
+            return
+        
+        if not ids:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Trajectory",
+                "No objects with ids Found from start to current frame %s" % currImg,
+            )
+            painter.end()
+            self.actions.trajectory.setChecked(Qt.Unchecked)
             return
             
         ## Draw trajectory points
