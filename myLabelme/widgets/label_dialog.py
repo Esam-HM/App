@@ -286,7 +286,7 @@ class LabelDialog(QtWidgets.QDialog):
             groupid = self.getGroupId()
             if groupid is not None:
                 self.uniqueIds.add(groupid)
-            print(self.uniqueIds)
+            #print(self.uniqueIds)
             return (
                 self.edit.text(),
                 self.getFlags(),

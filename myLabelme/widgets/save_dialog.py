@@ -1,4 +1,4 @@
-from qtpy.QtWidgets import QFileDialog, QDialog, QLabel, QFrame, QComboBox, QLineEdit, QVBoxLayout, QWidget, QHBoxLayout, QPushButton
+from qtpy.QtWidgets import QMessageBox, QFileDialog, QDialog, QLabel, QFrame, QComboBox, QLineEdit, QVBoxLayout, QWidget, QHBoxLayout, QPushButton
 from qtpy.QtCore import Qt, QTimer
 from .. import __appname__
 from os import path as osp
@@ -160,7 +160,7 @@ class SaveDialog(QDialog):
             self.outputLegend = {}
             if dialog.legend_data:
                 for key, val in dialog.legend_data.items():
-                    self.outputLegend[val] = key
+                    self.outputLegend[val.lower()] = key
             if dialog.savedLegendPath:
                 self.legendPathEditTxt.setText(dialog.savedLegendPath)
                 self.selectedLegend = dialog.savedLegendPath
@@ -193,6 +193,9 @@ class SaveDialog(QDialog):
                 self.selectedLegend = path
             else:
                 self.selectedLegend = None
+        else:
+            self.selectedLegend = None
+            
         ## Save settings.
         self.selectedOption = self.comboBox.currentIndex()
         self.toSave = True
@@ -230,6 +233,22 @@ class SaveDialog(QDialog):
         )
 
         if selectedFilePath:
+            if self.retLbl.isVisible():
+                msg = QMessageBox
+                replay = msg.question(
+                    None,
+                    "Warning",
+                    "You already have generated a legend. Do you want to ignore it?",
+                    msg.Yes | msg.Cancel,
+                    msg.Yes,
+                )
+                if replay == msg.Cancel:
+                    return
+                
+                self.outputLegend = {}
+                self.retLbl.setVisible(False)
+                self.adjustSize()
+                
             self.legendPathEditTxt.setText(selectedFilePath)
 
     def formatSelectionChanged(self):

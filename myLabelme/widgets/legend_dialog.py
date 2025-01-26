@@ -92,8 +92,9 @@ class GenerateLegendDialog(QDialog):
             self.labelList.addItems(self.labels)
 
         if prevLegend:
+            print(prevLegend)
             for key, val in prevLegend.items():
-                self.createTableItems(val, key)
+                self.createTableItems(str(val), key)
                 items = self.labelList.findItems(key, Qt.MatchExactly)
                 if items:
                     row = self.labelList.row(items[0])
@@ -163,7 +164,7 @@ class GenerateLegendDialog(QDialog):
 
         self.legend_data[int(id)] = label
 
-        self.createTableItems(label,id)
+        self.createTableItems(id,label)
 
         self.labelTxt.clear()
         self.idTxt.setText(str(int(self.table.rowCount())))
@@ -174,7 +175,7 @@ class GenerateLegendDialog(QDialog):
 
         self.toggleBtns()
 
-    def createTableItems(self, label:str, id:str):
+    def createTableItems(self, id:str, label:str):
         ## Add to table
         row_position = self.table.rowCount()
         self.table.insertRow(row_position)

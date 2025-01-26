@@ -12,6 +12,7 @@ from . import __version__
 from . import utils
 from .logger import logger
 from abc import ABC, abstractmethod
+from qtpy.QtWidgets import QMessageBox
 
 PIL.Image.MAX_IMAGE_PIXELS = None
 
@@ -53,6 +54,11 @@ def load_image_file(filename):
 
 class LabelFileError(Exception):
     pass
+
+
+class LegendError(Exception):
+    pass
+
 
 class LabelFile(ABC):
     outputFormats = {"Labelme": ".json", "YOLO": ".txt"}
@@ -223,11 +229,12 @@ class LabelmeLabelFile(LabelFile):
 ## Yolo Format Label file
 class YoloLabelFile(LabelFile):
     tempLegend = None
-    inputlegendPath = None
-    outputLegendPath = None
-    inputLegend = []            ## Classes stored in indexes according to their ids
-    outputLegend = {}           ## key: class name, value: id
-    generateLegend = False
+    inputlegendPath:str = None
+    outputLegendPath:str = None
+    inputLegend:list = []            ## Classes stored in indexes according to their ids
+    outputLegend:dict = {}           ## key: class name, value: id
+    selfLegend:dict = {}             ## self generated legend, key: class name, value: id
+    generateLegend:bool = False
     def __init__(self):
         self.shapes = []
         super().__init__()
@@ -283,28 +290,9 @@ class YoloLabelFile(LabelFile):
 
         return classID, [(x1,y1),(x2,y2)]
 
-    @staticmethod
-    def loadLegendFile(filepath:str=None):
-        if not filepath:
-            return
-        try:
-            legend = {}
-            with open(filepath, "r") as f:
-                lines = f.readlines()
-            
-            for i in range(len(lines)):
-                legend[lines[i].strip().lower()] = i
-
-            return legend
-        except Exception as e:
-            logger.error(
-                "Error reading legend file."
-            )
-            return
-
     def save(self,filename, shapes, imageWidth, imageHeight):
         ## class id, x_center, y_center, box width, box height,
-        print("saving")
+        #print("saving")
         lines = []
         for shape in shapes:
             if shape.get("shape_type","") == "rectangle" and len(shape["points"])==2:
@@ -318,19 +306,36 @@ class YoloLabelFile(LabelFile):
                 height = abs(y2-y1)
 
                 # Normalize
-                x_center = str(x_center/imageWidth)
-                y_center = str(y_center/imageHeight)
-                width = str(width/imageWidth)
-                height = str(height/imageHeight)
+                x_center = x_center/imageWidth
+                y_center = y_center/imageHeight
+                width = width/imageWidth
+                height = height/imageHeight
 
                 if YoloLabelFile.tempLegend is not None:
-                    print("From temp legend")
-                    classId = str(YoloLabelFile.tempLegend.get(shape["label"]))
+                    #print(f"From temp legend: {YoloLabelFile.tempLegend}")
+                    classId = YoloLabelFile.tempLegend.get(shape["label"])
+                    if classId is None:
+                        QMessageBox.critical(
+                            None,
+                            "Error",
+                            f"<p>Could not found label '{shape["label"]}' in the provided legend.<br> Please check your legend and try again</p>",
+                        )
+                        raise LegendError
+                elif YoloLabelFile.outputLegend:
+                    #print(f"From output legend: {YoloLabelFile.outputLegend}")
+                    classId = YoloLabelFile.outputLegend.get(shape["label"])
+                    if classId is None:
+                        QMessageBox.critical(
+                            None,
+                            "Error",
+                            f"<p>Could not found label '{shape["label"]}' in the provided legend.<br> Please check your legend and try again</p>",
+                        )
+                        raise LegendError
                 else:
-                    print("From output legend")
-                    classId = str(self.getClassID(shape["label"]))
-                if classId is None:
-                    classId = shape["label"]
+                    #print(f"self generate: {YoloLabelFile.selfLegend}")
+                    classId = self.getClassID(shape["label"])
+
+                assert classId is not None, f"Could not generate class id {shape["label"]}"
 
                 lines.append(f"{classId} {x_center} {y_center} {width} {height}\n")
 
@@ -342,22 +347,22 @@ class YoloLabelFile(LabelFile):
             raise LabelFileError
         
         if YoloLabelFile.generateLegend:
-            self.generateLegendFile(osp.join(osp.dirname(filename), "labelme-ytu-legend.txt"))
+            self.generateLegendFile(osp.join(osp.dirname(filename), "classes.txt"))
         
     def getClassID(self, label:str):
-        classId = YoloLabelFile.outputLegend.get(label.lower())
+        classId = YoloLabelFile.selfLegend.get(label)
         if classId is None:        ## class not found in output legend
-            print(f"New class ID for {label}")
-            classId = self.getNewClassID(YoloLabelFile.outputLegend)
-            YoloLabelFile.outputLegend[label.lower()] = classId
+            #print(f"New class ID for {label}")
+            classId = self.getNewClassID(YoloLabelFile.selfLegend)
+            YoloLabelFile.selfLegend[label.lower()] = classId
         return classId
     
     def generateLegendFile(self, filename):
-        classes = YoloLabelFile.outputLegend.keys()
+        classes = YoloLabelFile.selfLegend.keys()
         try:
             with open(filename, "w") as f:
                 for key in classes:
-                    f.write(key.title() + "\n")
+                    f.write(key + "\n")
                     # if i<len(keys):
                     #     f.write("\n")
         except Exception as e:
@@ -379,6 +384,25 @@ class YoloLabelFile(LabelFile):
 
         return maxId+1
     
+    @staticmethod
+    def loadLegendFile(filepath:str=None):
+        if not filepath:
+            return
+        try:
+            legend = {}
+            with open(filepath, "r") as f:
+                lines = f.readlines()
+            
+            for i in range(len(lines)):
+                legend[lines[i].strip()] = i
+
+            return legend
+        except Exception as e:
+            logger.error(
+                "Error reading legend file."
+            )
+            return
+    
 
 ## Label Studio Format Label File.
 class VideoLabelFile(LabelFile):
@@ -399,7 +423,7 @@ class VideoLabelFile(LabelFile):
                 interval = round(totalFrames/framesCount)
                 frameNo = frameIdx*interval + 1 ## current frame
             else:
-                print("No annotations in current frame")
+                #print("No annotations in current frame")
                 self.filename = VideoLabelFile.labelFilePath
                 self.flags = None
                 return
