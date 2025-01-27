@@ -23,7 +23,7 @@ class ExtractFramesDialog(QDialog):
         hLayout2 = QHBoxLayout()
         frameRateLbl = QLabel(self.tr("Select frame rate (FPS):"))
         self.frameRatePicker = QSpinBox()
-        self.frameRatePicker.setRange(1,100)
+        self.frameRatePicker.setRange(1,frameRate)
         self.frameRatePicker.setSingleStep(1)
         self.frameRatePicker.setValue(frameRate)
         hLayout2.addWidget(frameRateLbl)

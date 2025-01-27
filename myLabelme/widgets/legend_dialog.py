@@ -14,7 +14,7 @@ class GenerateLegendDialog(QDialog):
         self.setMaximumSize(500,750)
 
         self.labels = labels if labels else []
-        self.legend_data = {} ## key: id , value: class name
+        self.legend_data = {}         ## key: id , value: class name
         self.dir = dir if dir else ""
         self.savedLegendPath = None
 
@@ -86,26 +86,21 @@ class GenerateLegendDialog(QDialog):
 
         self.saveBtn.clicked.connect(self.saveFile)
         cancelBtn.clicked.connect(self.reject)
-        self.completeBtn.clicked.connect(self.complete)
+        self.completeBtn.clicked.connect(self.accept)
 
         if self.labels:
             self.labelList.addItems(self.labels)
 
         if prevLegend:
-            print(prevLegend)
+            print("(generateLegend) prevLegend: ",prevLegend)
             for key, val in prevLegend.items():
                 self.createTableItems(str(val), key)
+                self.legend_data[val] = key
                 items = self.labelList.findItems(key, Qt.MatchExactly)
                 if items:
                     row = self.labelList.row(items[0])
                     self.labelList.takeItem(row)
-    
-
-    def complete(self):
-        # if not self.checkLabels():
-        #     return
-        
-        self.accept()
+            print(f"legend generated: {self.legend_data}")
 
     def saveFile(self):
         self.savedLegendPath, _ = QFileDialog.getSaveFileName(self, "Save Legend File", self.dir, "TXT Files (*.txt)")
@@ -114,13 +109,6 @@ class GenerateLegendDialog(QDialog):
         
         if osp.splitext(self.savedLegendPath)[1].lower() != ".txt":
             QMessageBox.critical(self, "Error", "Only .txt files accepted")
-
-        # if not self.isIDsSequential():
-        #     QMessageBox.warning(self, "Error", "Your IDs must be sequential to save.")
-        #     return
-        
-        # if not self.checkLabels():
-        #     return
         
         keys = sorted(self.legend_data.keys())
 
@@ -211,8 +199,6 @@ class GenerateLegendDialog(QDialog):
             self.delete_selected_rows()
 
     def toggleBtns(self):
-        flag3 = self.table.rowCount()>0
-        self.saveBtn.setEnabled(flag3)
-        self.completeBtn.setEnabled(flag3)
-
-
+        flag = self.table.rowCount()>0
+        self.saveBtn.setEnabled(flag)
+        self.completeBtn.setEnabled(flag)

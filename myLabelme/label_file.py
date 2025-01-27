@@ -67,15 +67,15 @@ class LabelFile(ABC):
     def __init__(self):
         self.filename = None
         self.shapes = []
-        self.imageWidth = None
-        self.imageHeight = None
+        #self.imageWidth = None
+        #self.imageHeight = None
 
     @abstractmethod
     def load(self,filename:str):
         pass
 
     @abstractmethod
-    def save(self,shapes,imageSize):
+    def save(self,shapes,imageWidth, imageHeight):
         pass
 
     @staticmethod
@@ -134,7 +134,7 @@ class LabelmeLabelFile(LabelFile):
                 imageData = load_image_file(imagePath)
             flags = data.get("flags") or {}
             imagePath = data["imagePath"]
-            self._check_image_height_and_width(
+            imageHeight, imageWidth = self._check_image_height_and_width(
                 base64.b64encode(imageData).decode("utf-8"),
                 data.get("imageHeight"),
                 data.get("imageWidth"),
@@ -153,6 +153,7 @@ class LabelmeLabelFile(LabelFile):
                 for s in data["shapes"]
             ]
         except Exception as e:
+            logger.error(e)
             raise LabelFileError(e)
 
         otherData = {}
@@ -167,8 +168,8 @@ class LabelmeLabelFile(LabelFile):
         self.imageData = imageData
         self.filename = filename
         self.otherData = otherData
-        self.imageHeight = data.get("imageHeight")
-        self.imageWidth = data.get("imageWidth")
+        self.imageHeight = imageHeight
+        self.imageWidth = imageWidth
 
     @staticmethod
     def _check_image_height_and_width(imageData, imageHeight, imageWidth):
@@ -239,14 +240,14 @@ class YoloLabelFile(LabelFile):
         self.shapes = []
         super().__init__()
 
-    def load(self, filename:str):
+    def load(self, filename:str, imageWidth:int, imageHeight:int):
         with open(filename, "r") as f:
             lines = f.readlines()
 
         for line in lines:
             data = line.strip().split()
             if data:
-                pp = self.formatYoloData(data)
+                pp = self.formatYoloData(data, imageWidth, imageHeight)
                 if pp is None:
                     raise LabelFileError("Not valid yolo label file")
 
@@ -270,17 +271,18 @@ class YoloLabelFile(LabelFile):
         #self.filename = filename
 
 
-    def formatYoloData(self, data:list):
+    def formatYoloData(self, data:list, imageWidth:int, imageHeight:int):
         if len(data)!=5:
             return
 
         try:
             classID = int(data[0])
-            x_center = float(data[1])*self.imageWidth
-            y_center = float(data[2])*self.imageHeight
-            box_width = float(data[3])*self.imageWidth
-            box_height = float(data[4])*self.imageHeight
-        except ValueError:
+            x_center = float(data[1])*imageWidth
+            y_center = float(data[2])*imageHeight
+            box_width = float(data[3])*imageWidth
+            box_height = float(data[4])*imageHeight
+        except ValueError as e:
+            logger.error(e)
             return
 
         x1 = int(x_center-box_width/2)
@@ -318,9 +320,10 @@ class YoloLabelFile(LabelFile):
                         QMessageBox.critical(
                             None,
                             "Error",
-                            f"<p>Could not found label '{shape["label"]}' in the provided legend.<br> Please check your legend and try again</p>",
+                            f"<p>Could not found label '{shape["label"]}' in the provided legend.<br> Please check and regenerate your legend from change save settings under file menu and try again.</p>",
                         )
                         raise LegendError
+                    print(f"saved with tempLegend: {YoloLabelFile.tempLegend}")
                 elif YoloLabelFile.outputLegend:
                     #print(f"From output legend: {YoloLabelFile.outputLegend}")
                     classId = YoloLabelFile.outputLegend.get(shape["label"])
@@ -328,12 +331,14 @@ class YoloLabelFile(LabelFile):
                         QMessageBox.critical(
                             None,
                             "Error",
-                            f"<p>Could not found label '{shape["label"]}' in the provided legend.<br> Please check your legend and try again</p>",
+                            f"<p>Could not found label '{shape["label"]}' in the provided legend.<br> Please check and regenerate your legend from change save settings under file menu and try again.</p>",
                         )
                         raise LegendError
+                    print(f"saved with output legend: {YoloLabelFile.outputLegend}")
                 else:
                     #print(f"self generate: {YoloLabelFile.selfLegend}")
                     classId = self.getClassID(shape["label"])
+                    print(f"saved with selfLegend: {YoloLabelFile.selfLegend}")
 
                 assert classId is not None, f"Could not generate class id {shape["label"]}"
 
@@ -343,33 +348,20 @@ class YoloLabelFile(LabelFile):
         try:
             with open(filename, "w") as f:
                 f.writelines(lines)
-        except:
-            raise LabelFileError
+        except Exception as e:
+            raise LabelFileError(e)
         
         if YoloLabelFile.generateLegend:
-            self.generateLegendFile(osp.join(osp.dirname(filename), "classes.txt"))
+            self.generateLegendFile(osp.join(osp.dirname(filename), "labelme-ytu-classes.txt"))
         
     def getClassID(self, label:str):
         classId = YoloLabelFile.selfLegend.get(label)
         if classId is None:        ## class not found in output legend
             #print(f"New class ID for {label}")
             classId = self.getNewClassID(YoloLabelFile.selfLegend)
-            YoloLabelFile.selfLegend[label.lower()] = classId
+            YoloLabelFile.selfLegend[label] = classId
         return classId
     
-    def generateLegendFile(self, filename):
-        classes = YoloLabelFile.selfLegend.keys()
-        try:
-            with open(filename, "w") as f:
-                for key in classes:
-                    f.write(key + "\n")
-                    # if i<len(keys):
-                    #     f.write("\n")
-        except Exception as e:
-            logger.error("Could not save new legend file")
-        
-        YoloLabelFile.generateLegend = False
-
     def getNewClassID(self, legend:dict):
         YoloLabelFile.generateLegend = True
         ids = list(legend.values())
@@ -383,6 +375,19 @@ class YoloLabelFile(LabelFile):
                 maxId = id
 
         return maxId+1
+    
+    def generateLegendFile(self, filename):
+        classes = YoloLabelFile.selfLegend.keys()
+        try:
+            with open(filename, "w") as f:
+                for key in classes:
+                    f.write(key + "\n")
+                    # if i<len(keys):
+                    #     f.write("\n")
+        except Exception as e:
+            logger.error("Could not save new legend file")
+        
+        YoloLabelFile.generateLegend = False
     
     @staticmethod
     def loadLegendFile(filepath:str=None):
@@ -411,7 +416,7 @@ class VideoLabelFile(LabelFile):
     def __init__(self):
         super().__init__()
         pass
-    def load(self, filename:str=None, frameIdx:int=0, framesCount:int=0):
+    def load(self, filename:str=None, imageWidth:int=0, imageHeight:int=0, frameIdx:int=0, framesCount:int=0):
         try:
             with open(VideoLabelFile.labelFilePath, "r") as f:
                 data = json.load(f)
@@ -442,7 +447,7 @@ class VideoLabelFile(LabelFile):
                     shape["shape_type"] = "rectangle"
                     shape["points"] = []
 
-                    koords = self.getVideoObjectKoords(frames[idx])
+                    koords = self.getVideoObjectKoords(frames[idx], imageWidth, imageHeight)
 
                     for x,y in koords:
                         shape["points"].append([x,y])
@@ -466,11 +471,11 @@ class VideoLabelFile(LabelFile):
                 high = mid - 1
         return -1
 
-    def getVideoObjectKoords(self, koords):
-        x = int(self.imageWidth*koords["x"]/100)
-        y = int(self.imageHeight*koords["y"]/100)
-        width = int(self.imageWidth*koords["width"]/100)
-        height = int(self.imageHeight*koords["height"]/100)
+    def getVideoObjectKoords(self, koords, imageWidth, imageHeight):
+        x = int(imageWidth*koords["x"]/100)
+        y = int(imageHeight*koords["y"]/100)
+        width = int(imageWidth*koords["width"]/100)
+        height = int(imageHeight*koords["height"]/100)
 
         return [[x,y], [x+width,y+height]]
 

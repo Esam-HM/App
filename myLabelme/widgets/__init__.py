@@ -32,4 +32,4 @@ from .save_setting_dialog import SaveSettingDialog
 
 from .box_setting_dialog import BoxSettingsDialog
 
-from .wait_dialog import WaitDialog
+from .wait_dialog import WaitDialog, ProgressDialog

@@ -22,7 +22,7 @@ from .widgets import (BrightnessContrastDialog, Canvas,
                              LabelDialog, LabelListWidget, LabelListWidgetItem, ToolBar,
                              UniqueLabelQListWidget, ZoomWidget, ExtractFramesDialog,
                              LoadLabelFilesDialog, SaveDialog, SaveSettingDialog,
-                             BoxSettingsDialog, GenerateLegendDialog, WaitDialog,)
+                             BoxSettingsDialog, GenerateLegendDialog, WaitDialog, ProgressDialog,)
 from . import utils
 
 
@@ -65,7 +65,6 @@ class MainWindow(QtWidgets.QMainWindow):
             Qt.Vertical: {},
         }  # key=filename, value=scroll_value
         self.multipleFilesLoaded = False
-        self.loadShapesFromFile=False
         self.buffer = {}        ## key=imagePath, value={"shapes": [], "flags": {}, "image_size": [width, height], "dirty": bool}
         self.labelFileType = 0  ## 0: labelme, 1: yolo format, 2: video label studio format.
         self.labelFilesDir = None
@@ -451,7 +450,7 @@ class MainWindow(QtWidgets.QMainWindow):
         createBoxMode = action(
             self.tr("Create Box"),
             lambda: self.toggleDrawMode(False, createMode="box"),
-            None,
+            shortcuts["create_box"],
             "objects",
             self.tr("Start drawing fixed rectangles"),
             enabled=False,
@@ -770,7 +769,7 @@ class MainWindow(QtWidgets.QMainWindow):
             enabled=False,
         )
         loadAnnotationFile = action(
-            self.tr("Load Label File"),
+            self.tr("Load Annotations From File"),
             self.openAnnotationFile,
             None,
             "objects",
@@ -913,8 +912,8 @@ class MainWindow(QtWidgets.QMainWindow):
             loadAnnotationFile=loadAnnotationFile,
             selectAiModelFile=selectAiModelFile,
             trajectory = trajectory,
-            onDirLoad = (fillGapVideo, trajectory, loadLblFiles, openNextImg, openPrevImg, changeSaveSettings, saveAuto),
-            onAnyLoadActive = (loadLblFiles, changeSaveSettings, saveAuto),
+            onDirLoad = (fillGapVideo, trajectory, openNextImg, loadLblFiles, openPrevImg, changeSaveSettings, saveAuto),
+            onAnyLoadActive = (changeSaveSettings, saveAuto),
         )
 
 
@@ -984,6 +983,7 @@ class MainWindow(QtWidgets.QMainWindow):
             opendir,
             self.menus.recentFiles,
             loadLblFiles,
+            loadAnnotationFile,
             extractFrames,
             save,
             saveAll,
@@ -1218,6 +1218,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.resetApplicationState()
             if self.fileListWidget.count()>0:
                 self.fileListWidget.clear()
+                self.actions.loadLblFiles.setEnabled(False)
                 self.actions.openNextImg.setEnabled(False)
                 self.actions.openPrevImg.setEnabled(False)
             self.loadFile(selectedFilePath)
@@ -1231,7 +1232,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggleActions(False)
         self.canvas.setEnabled(False)
         self.actions.saveAs.setEnabled(False)
-        self.actions.saveAllAs.setEnabled(False)
+        #self.actions.saveAllAs.setEnabled(False)
         self.actions.undo.setEnabled(False)
         self.actions.undoLastPoint.setEnabled(False)
         self.actions.delete.setEnabled(False)
@@ -1240,6 +1241,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggleRunYoloBtns()
         if self.fileListWidget.count()<=0:
             self.toggleLoadActions(False)
+            self.actions.loadLblFiles.setEnabled(False)
         return True
 
     ## Delete currently opened image's label file.
@@ -1373,23 +1375,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self.buffer[filename] = {}
 
         ## search for current shapes/flags in buffer.
-        ## if found load them. if not, search for label file if provided.
-        ## if label file provided, load from label file 
+        ## if found load them.
         if self.buffer[filename].get("shapes",None) is not None or self.buffer[filename].get("flags",None) is not None:
             #print("load from buffer")
             bufferedData = self.buffer[filename]
             self.loadShapes(bufferedData.get("shapes",[]))      ## load shapes from buffer.
             flags.update(bufferedData.get("flags",{}))          ## update flags from buffer.
-            
-
-            # if bufferedData.get("dirty",False):
-            #     self.setDirty()
-            # else:
-            #     self.setClean()
 
         else:
             #print("Not found in buffer")
-            self.buffer[filename]["image_size"] = [image.width(), image.height()]
+            if not self.buffer[filename].get("image_size",None):
+                self.buffer[filename]["image_size"] = [image.width(), image.height()]
         
         self.loadFlags(flags)   ## load to flags widget
 
@@ -1456,6 +1452,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.resetApplicationState()
             if self.fileListWidget.count()>0:
                 self.fileListWidget.clear()
+                self.actions.loadLblFiles.setEnabled(False)
                 self.actions.openNextImg.setEnabled(False)
                 self.actions.openPrevImg.setEnabled(False)
             self.loadFile(filename)
@@ -1492,7 +1489,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.errorMessage("Error Opening Video","Error: Could not open video file.")
                     return
                 
-                videoDialog = ExtractFramesDialog(osp.splitext(selectedFilePath)[0], int(cap.get(cv2.CAP_PROP_FPS)))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if fps <= 0:
+                    self.errorMessage("Error Retrieving FPS", "Error: Could not retrieve valid FPS from video.")
+                    return
+
+                videoDialog = ExtractFramesDialog(osp.splitext(selectedFilePath)[0], int(fps))
                 
                 if videoDialog.exec() == QtWidgets.QDialog.Accepted:
                     self.extractFrames(cap,
@@ -1513,12 +1515,13 @@ class MainWindow(QtWidgets.QMainWindow):
         fps = cap.get(cv2.CAP_PROP_FPS)
         # Calculate frame interval based on desired framerate
         frame_interval = int(round(fps / framerate))
+        if frame_interval<=0:
+            self.errorMessage("Error Extracting Frames", "The frame rate is too high. Please adjust the frame rate and try again.")
+            return
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_count = 0
         frame_num = 0
-        progress = QtWidgets.QProgressDialog("Extracting Video", "Cancel", 0, (int)(total_frames/frame_interval),self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)      ## show progress
+        progress = ProgressDialog("Extracting Video Frames...",(int)(total_frames/frame_interval),self)
         # Read and save frames
         while True:
             ret, frame = cap.read()
@@ -1542,7 +1545,10 @@ class MainWindow(QtWidgets.QMainWindow):
         progress.setValue(int(total_frames/frame_interval))
         self.status("Frames saved succesfully to %s" % dirpath)
 
-        #self.importDirImages(dirpath)
+        msg = QtWidgets.QMessageBox
+        answer = msg.question(self,"Load Frames","Do you want to load extracted frames?",msg.Yes | msg.No,msg.Yes)
+        if answer == msg.Yes:
+            self.importDirImages(dirpath)
 
     ## Used to update recent files menu.
     def updateFileMenu(self):
@@ -1639,7 +1645,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def duplicateSelectedShape(self):
         added_shapes = self.canvas.duplicateSelectedShapes()
+        ids = self.getCurrentIDs()
         for shape in added_shapes:
+            if shape.group_id is not None and shape.group_id in ids:
+                shape.group_id = None
             self.addLabel(shape)
         self.setDirty()
 
@@ -1746,12 +1755,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.uniqLabelList.setItemLabel(item, label, rgb)
         self.labelDialog.addLabelHistory(label)
 
-    ## Ask user to replace current shapes or not
     def replaceShapes(self):
+        '''Ask user to replace current shapes or not'''
         mb = QtWidgets.QMessageBox
-        replay = mb.question(
+        replay = mb.warning(
             self,
-            "Overwrite Annotations",
+            "Attention",
             "This process will overwrite current annotations. Do you want to continue?",
             mb.Yes | mb.Cancel,
             mb.Yes,
@@ -1762,8 +1771,8 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             return False
 
-    ## add labels to label and uniqLabel list.
     def addLabel(self, shape):
+        '''add given shape to labelList and uniqLabelList.'''
         if shape.group_id is None:
             text = shape.label
         else:
@@ -1788,17 +1797,8 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         )
 
-    def hasLabels(self):
-        if self.noShapes():
-            self.errorMessage(
-                "No objects labeled",
-                "You must label at least one object to save the file.",
-            )
-            return False
-        return True
-
-    ## Get label color.
     def _get_rgb_by_label(self, label):
+        '''return color for given label'''
         if self._config["shape_color"] == "auto":
             item = self.uniqLabelList.findItemByLabel(label)
             if item is None:
@@ -1822,6 +1822,7 @@ class MainWindow(QtWidgets.QMainWindow):
     ###############   Flags    ###################
 
     def loadFlags(self, flags):
+        '''Load flags to flags list widget'''
         self.flag_widget.clear()
         for key, flag in flags.items():
             item = QtWidgets.QListWidgetItem(key)
@@ -1831,8 +1832,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     ############## Label List Widget ########################
 
-    ## show/hide shapes
     def togglePolygons(self, value):
+        '''show/hide shapes'''
         flag = value
         for item in self.labelList:
             if value is None:
@@ -1922,7 +1923,6 @@ class MainWindow(QtWidgets.QMainWindow):
             item = self.labelList.findItemByShape(shape)
             self.labelList.removeItem(item)
 
-
     ## Label validation
     def validateLabel(self, label):
         # no validation
@@ -1949,7 +1949,7 @@ class MainWindow(QtWidgets.QMainWindow):
     ################## File list Widget Functions  ################
 
     def fileSearchChanged(self):
-        if not self.multipleFilesLoaded:    ## return if list empty
+        if not self.multipleFilesLoaded:    ## prevent search if list empty
             return
         
         self.fileListWidget.clear()
@@ -1963,30 +1963,29 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.addFilesToFileList(filenames)
 
-    ## triggered when selecting new file item
-    ## to load it.
     def fileSelectionChanged(self):
+        '''triggered when selecting new file item from file list'''
         ## Enable and Disable File list widget buttons.
         isEnable = len(self.fileListWidget.selectedItems())>0
         self.fileListDeleteBtn.setEnabled(isEnable)
         self.fileListEditBtn.setEnabled(isEnable and not self.fileListEditMode)
 
-        if not self.fileListEditMode:   ## Do not load image when editing file list.
-            #print("File Selection Changed")
-            items = self.fileListWidget.selectedItems()
-            if not items:
-                return
+        if self.fileListEditMode:   ## Do not load image when editing file list.
+            return
+        #print("File Selection Changed")
+        items = self.fileListWidget.selectedItems()
+        if not items:
+            return
 
-            item = items[0]
-            currIndex = self.fileListWidget.row(item)
-            if currIndex < self.fileListWidget.count():
-                filename = item.text()
-                if filename:
-                    #self.actions.saveAll.setEnabled(self.isAllDirty())
-                    self.toggleAllBtns()
-                    self.loadFile(filename)
+        item = items[0]
+        currIndex = self.fileListWidget.row(item)
+        if currIndex < self.fileListWidget.count():
+            filename = item.text()
+            if filename:
+                self.toggleAllBtns()
+                self.loadFile(filename)
 
-    ## Adding all files from fileList to image list.
+    ## return array of all files from fileList.
     @property
     def imageList(self):
         lst = []
@@ -1995,18 +1994,22 @@ class MainWindow(QtWidgets.QMainWindow):
             lst.append(item.text())
         return lst
 
-    ## Toggle file list state to default.
     def resetFileListWidget(self, load=True):
+        '''reset file list state to default.'''
         self.fileListEditMode=False
         self.fileListCancelBtn.setEnabled(False)
-        # self.actions.openNextImg.setEnabled(True)
-        # self.actions.openPrevImg.setEnabled(True)
+        
         self.fileListWidget.setSelectionMode(QtWidgets.QListWidget.SingleSelection)
         if load:
-            # if self.fileListWidget.count()<=0:
-            #     self.actions.openNextImg.setEnabled(False)
-            #     self.actions.openPrevImg.setEnabled(False)
-            #     return
+            if self.fileListWidget.count()<=0:
+                #self.actions.openNextImg.setEnabled(False)
+                #self.actions.openPrevImg.setEnabled(False)
+                self.dirty = False
+                self.allDirty = False
+                self.resetApplicationState()
+                return
+            self.actions.openNextImg.setEnabled(True)
+            self.actions.openPrevImg.setEnabled(True)
             ## If current file not removed >> just mark it as current row without reloading image.
             items = self.fileListWidget.findItems(self.filename, Qt.MatchExactly)
             if not items:
@@ -2018,26 +2021,25 @@ class MainWindow(QtWidgets.QMainWindow):
             self.fileListWidget.setCurrentRow(row)
             self.fileListWidget.itemSelectionChanged.connect(self.fileSelectionChanged)
 
-
-    ## Change file list mode to edit to select multiple items.
     def editFileListWidget(self):
+        '''Change file list mode to edit to select multiple items.'''
         self.fileListEditMode=True      ## Disable signal when selecting multiple items.
         self.fileListWidget.clearSelection()
         self.fileListWidget.setSelectionMode(QtWidgets.QListWidget.MultiSelection)
         self.fileListEditBtn.setEnabled(False)
         self.fileListCancelBtn.setEnabled(True)
-        # self.actions.openNextImg.setEnabled(False)
-        # self.actions.openPrevImg.setEnabled(False)
+        self.actions.openNextImg.setEnabled(False)
+        self.actions.openPrevImg.setEnabled(False)
 
-    ## Remove selected item/s.
     def removeSelectedFiles(self):
+        '''Remove selected item/s from file list'''
         items = self.fileListWidget.selectedItems()
 
         mb = QtWidgets.QMessageBox
-        replay = mb.question(
+        replay = mb.warning(
             self,
-            "Remove Files",
-            "%s files will be removed from list. Are you sure?" % len(items),
+            "Attention",
+            "You are about to permanently remove %s files from list. Are you sure?" % len(items),
             mb.Yes | mb.No | mb.Cancel,
             mb.Yes,
         )
@@ -2058,15 +2060,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 #     currItemRow = row
                 # else:
                 #     self.fileListWidget.takeItem(row)
-
             # if currItemRow is not None and self.closeFile():
             #     self.fileListWidget.takeItem(currItemRow)
-
             self.resetFileListWidget()
 
     def fileListChanged(self):
-        if self.fileSearch.hasFocus():      ## return if user searching files in list.
+        '''Triggered when adding or removing items from file list'''
+        if self.fileSearch.hasFocus():      ## do no thing if user searching files in list.
             return
+        print("fileListChanged")
         if self.fileListWidget.count() == 0:
             for action in self.actions.onDirLoad:
                 action.setEnabled(False)
@@ -2076,77 +2078,93 @@ class MainWindow(QtWidgets.QMainWindow):
                 action.setEnabled(True)
             self.multipleFilesLoaded = True
 
-
     ##############  utils  #############
 
-    ## Check for unsaved data. (when dirty is true)
     def mayContinue(self, singleFile=False):
+        '''Check for unsaved data. (if dirty or allDirty is true)'''
         #print("May continue?")
         if not self.dirty and not self.allDirty:
             return True
         
         if not singleFile:
-            singleFile = self.fileListWidget.count()<=0
+            singleFile = self.fileListWidget.count()==0
 
-        if self.outputFileFormat is None or self.output_dir is None:
-            defDir = osp.dirname(self.imagePath) if self.imagePath else "."
-            legendPath = YoloLabelFile.outputLegendPath if YoloLabelFile.outputLegendPath else YoloLabelFile.inputlegendPath
-            dialog = SaveDialog(dirPath=defDir, legendPath=legendPath, labels=self.uniqLabelList.labels)
-            if dialog.exec_() != QtWidgets.QDialog.Rejected:
-                if dialog.toSave == True:      ## Save
-                    self.outputFileFormat = dialog.selectedOption
-                    self.output_dir = dialog.selectedDir
-                    if self.outputFileFormat == 1:
-                        legend = {}
-                        if dialog.outputLegend:
-                            legend = dialog.outputLegend
-                        elif dialog.selectedLegend:
-                            legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
-                        if legend:
-                            YoloLabelFile.outputLegendPath = dialog.selectedLegend
-                            YoloLabelFile.outputLegend = legend
-                    if singleFile:
-                        #print("Save single file")
-                        self.saveFile()
-                    else:
-                        #print("save all files")
-                        self.saveAllOutputFiles()
-                else:       ## Discard
-                    self.dirty = False
-                    self.allDirty = False
-
-                return True
-
-            else:           ## Cancel
-
-                return False
+        toDo = -1
+        if self.outputFileFormat is None or self.output_dir is None:            ### set save settings.
+            toDo = self.openSaveDialog()
             
-        else:
+        else:               ## save settings already set.
             #print("setting already done")
-            mb = QtWidgets.QMessageBox
-            msg = self.tr('Save all images annotations to "{}" before closing?').format(self.output_dir)
-            answer = mb.question(
-                self,
-                self.tr("Save annotations?"),
-                msg,
-                mb.Save | mb.Discard | mb.Cancel,
-                mb.Save,
-            )
-            if answer == mb.Discard:
-                #self.setClean()
-                self.dirty = False
-                self.allDirty = False
-                return True
-            elif answer == mb.Save:
-                if singleFile:
-                    #print("Saved single file")
-                    self.saveFile()
-                else:
-                    self.saveAllOutputFiles()
-                return True
-            else:  # answer == mb.Cancel
-                return False
+            toDo = self.popUpSaveMessageBox()
+
+        if toDo == 1:       ## Save
+            if singleFile:
+                print("Save Single File")
+                isSaved = self.saveFile()
+            else:
+                print("Save all Files")
+                isSaved = self.saveAllOutputFiles()
             
+            return isSaved
+        
+        if toDo == 0:       ## Discard
+            print("Discard")
+            self.dirty = False
+            self.allDirty = False
+
+            return True
+        
+        print("Cancel")
+        return False        ## Cancel
+            
+    def popUpSaveMessageBox(self):
+        '''returns: 
+        0 = discard,
+        1 = save,
+        -1 = cancel,
+        '''
+        mb = QtWidgets.QMessageBox
+        msg = self.tr('Save all images annotations to "{}" before closing?').format(self.output_dir)
+        answer = mb.question(
+            self,
+            self.tr("Save annotations?"),
+            msg,
+            mb.Save | mb.Discard | mb.Cancel,
+            mb.Save,
+        )
+        if answer == mb.Discard:    ## discard
+            return 0
+        
+        if answer == mb.Save:    ## save
+            return 1
+        
+        return -1 ## cancel
+            
+    def openSaveDialog(self):
+        '''returns: 
+        0 = discard,
+        1 = save,
+        -1 = cancel,
+        '''
+        print("Configure save settings")
+        defDir = osp.dirname(self.imagePath) if self.imagePath else None
+        legendPath = YoloLabelFile.outputLegendPath if YoloLabelFile.outputLegendPath else YoloLabelFile.inputlegendPath
+        dialog = SaveDialog(dirPath=defDir, legendPath=legendPath, labels=self.uniqLabelList.labels)
+        if dialog.exec_() != QtWidgets.QDialog.Rejected:
+            if dialog.toSave == True:      ## Save
+                self.outputFileFormat = dialog.selectedOption
+                self.output_dir = dialog.selectedDir
+                if self.outputFileFormat == 1:
+                    legend = dialog.outputLegend or (dialog.selectedLegend and YoloLabelFile.loadLegendFile(dialog.selectedLegend))
+                    if legend:
+                        YoloLabelFile.outputLegendPath = dialog.selectedLegend
+                        YoloLabelFile.outputLegend = legend
+                print(self.outputFileFormat, self.output_dir, legend)
+                return 1    ## save
+            else:
+                return 0    ## discard
+        
+        return -1   ## cancel
 
     def setDirty(self):
         # Even if we autosave the file, we keep the ability to undo
@@ -2170,7 +2188,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(title)
 
         if self.fileListWidget.count()>0:
-            self.fileListWidget.currentItem().setCheckState(Qt.Unchecked)
+            item = self.fileListWidget.currentItem()
+            if item:
+                item.setCheckState(Qt.Unchecked)
 
     def setClean(self):
         self.dirty = False
@@ -2205,6 +2225,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def resetApplicationState(self, clearDataOnly:bool=False):
         '''Reset application state vairables'''
+        print("Reset application state")
         if clearDataOnly:       ## Only clear shapes. No start from scratch. 
             for file in self.buffer.keys():
                 self.buffer[file] = {}
@@ -2214,7 +2235,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.labelFilesDir = None
         self.labelFileType = 0
-        #self.loadShapesFromFile = False
         self.output_dir = None
         self.outputFileFormat = None
         YoloLabelFile.inputLegend.clear()
@@ -2373,9 +2393,10 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             legendPath = YoloLabelFile.inputlegendPath
 
+        defLegend = YoloLabelFile.outputLegend if YoloLabelFile.outputLegend else YoloLabelFile.selfLegend
         dialog = SaveSettingDialog(
             self.outputFileFormat, defaultDir,
-            legendPath, self.actions.saveAuto.isChecked(),self.uniqLabelList.labels
+            legendPath, self.actions.saveAuto.isChecked(),self.uniqLabelList.labels, defLegend
         )
 
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
@@ -2393,7 +2414,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if legend:
                     YoloLabelFile.outputLegendPath = dialog.selectedLegend
                     YoloLabelFile.outputLegend = legend
-                    if self.labelDialog.labelList.count()>0:
+                    if self.labelDialog.labelList.count()>0:   ## add to labelDialog
                         self.labelDialog.deleteAllLabels()
                     self.labelDialog.addLabels(list(legend.keys()))
 
@@ -2417,22 +2438,25 @@ class MainWindow(QtWidgets.QMainWindow):
     def saveFile(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
         #print("saveFile")
+        saveStatus = False
         if self.output_file:
-            self._saveFile(self.output_file)
+            saveStatus = self._saveFile(self.output_file)
             self.close()
-            return
+            return saveStatus
         
         if self.outputFileFormat is None or not self.output_dir:
             if self.setSaveSettings():
                 label_file = osp.splitext(self.imagePath)[0] + LabelFile.outputSuffixes[self.outputFileFormat]
                 label_file = osp.join(self.output_dir, osp.basename(label_file))
                 #print(label_file)
-                self._saveFile(label_file)
+                saveStatus = self._saveFile(label_file)
         
         else:
             label_file = osp.splitext(self.imagePath)[0] + LabelFile.outputSuffixes[self.outputFileFormat]
             label_file = osp.join(self.output_dir, osp.basename(label_file))
-            self._saveFile(label_file)
+            saveStatus = self._saveFile(label_file)
+        
+        return saveStatus
 
     def saveFileAs(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
@@ -2472,6 +2496,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _saveFile(self, filename):
         if filename and self.saveLabels(filename, self.imagePath):
             self.setClean()
+            return True
+        
+        return False
 
     def saveLabels(self, filename:str, imgPath:str, showMessage:bool=True):
         '''
@@ -2541,22 +2568,169 @@ class MainWindow(QtWidgets.QMainWindow):
         except LabelFileError as e:
             if showMessage:
                 self.errorMessage(
-                    self.tr("Error saving label data"), self.tr("<b>%s</b>") % e
+                    self.tr("Error saving label data"), self.tr("<b>Error happened when saving %s</b>") % imgPath
                 )
             return False
         
         except LegendError as e:
             return 0
         
-    def isAllDirty(self):
+    def saveAllOutputFiles(self):
+        '''
+        Save all images found in files list
+        '''
+        #print("All files saved")
+        if self.fileListWidget.count()<=0:
+            self.actions.saveAll.setEnabled(False)
+            return
+
+        if self.outputFileFormat is None or not self.output_dir:
+            if not self.setSaveSettings():
+                return
+        
+        progress_dialog = ProgressDialog("Saving files....",self.fileListWidget.count(), self)
         i=0
-        dirty = False
-        while not dirty and i<self.fileListWidget.count():
-            image_path = self.fileListWidget.item(i).text()
-            dirty = self.buffer[image_path].get("dirty",False)
+        noErr = True
+        isLegendErr = False
+        canceled = False
+        while not canceled and noErr and i<self.fileListWidget.count():
+            progress_dialog.setValue(i)
+            if progress_dialog.wasCanceled():
+                canceled = True
+            else:
+                image_path = self.fileListWidget.item(i).text()
+                #print(i)
+                if self.buffer[image_path].get("dirty", False) and (self.buffer[image_path].get("shapes") or self.buffer[image_path].get("flags")):
+                    #print("Saving")
+                    labelFile = osp.splitext(image_path)[0] + LabelFile.outputSuffixes[self.outputFileFormat]
+                    labelFile = osp.join(self.output_dir,osp.basename(labelFile))
+                    state = self.saveLabels(labelFile, image_path)
+                    if state is True:
+                        self.fileListWidget.item(i).setCheckState(Qt.Checked)
+                    else:
+                        isLegendErr = state==0
+                        noErr = False
+            i+=1
+        
+        if canceled:            ## if progress canceled, check if current item saved or not
+            if self.imagePath:
+                curr = self.imagePath
+            else:
+                curr = self.fileListWidget.currentItem().text()
+                
+            if curr:    
+                self.dirty = self.buffer[curr].get("dirty",False)
+                self.actions.save.setEnabled(self.dirty)
+            return True
+
+        if not noErr:           ## if error occured during process. return
+            progress_dialog.close()
+            if isLegendErr:     ## if legend error, undo all saved files.
+                self.undoSavedFiles(i)
+            return False
+
+        self.allDirty = False
+        self.dirty = False
+        self.actions.save.setEnabled(False)
+        self.actions.saveAll.setEnabled(False)
+        progress_dialog.setValue(self.fileListWidget.count())
+        return True
+
+    def undoSavedFiles(self, lastFileIdx:int):
+        i = 0
+        while i<lastFileIdx:
+            image = self.fileListWidget.item(i).text()
+            if self.buffer[image].get("dirty",None) is not None:
+                self.buffer[image]["dirty"] = True
+                self.fileListWidget.item(i).setCheckState(Qt.Unchecked)
             i+=1
 
-        return dirty
+    def saveAllOutputFilesAs(self):
+        if self.fileListWidget.count()<=0:
+            self.actions.saveAllAs.setEnabled(False)
+            return
+        if self.output_dir:
+            defaultDir = self.output_dir
+        else:
+            defaultDir = osp.dirname(self.imagePath) if self.imagePath else None
+
+        legendPath = YoloLabelFile.outputLegendPath if YoloLabelFile.outputLegendPath else YoloLabelFile.inputlegendPath
+        defLegend = YoloLabelFile.outputLegend if YoloLabelFile.outputLegend else YoloLabelFile.selfLegend
+        dialog = SaveDialog(1, dirPath=defaultDir, legendPath=legendPath, labels=self.uniqLabelList.labels, legend=defLegend)
+        legend = None
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            if dialog.selectedOption ==1:
+                if dialog.outputLegend:
+                    legend = dialog.outputLegend
+                elif dialog.selectedLegend:
+                    legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
+        else:
+            return
+        
+        progress_dialog = ProgressDialog("Saving files...",self.fileListWidget.count(),self)
+        i=0
+        isLegendErr = False
+        noErr = True
+        canceled = False
+        while not canceled and noErr and i<self.fileListWidget.count():
+            progress_dialog.setValue(i)
+            if progress_dialog.wasCanceled():
+                canceled = True
+            else:
+                image_path = self.fileListWidget.item(i).text()
+                if self.buffer[image_path].get("shapes") or self.buffer[image_path].get("flags"):
+                    #print("Saving")
+                    labelFile = osp.splitext(image_path)[0] + LabelFile.outputSuffixes[dialog.selectedOption]
+                    labelFile = osp.join(dialog.selectedDir,osp.basename(labelFile))
+                    if legend:
+                        YoloLabelFile.tempLegend = legend
+
+                    state = self.saveLabels(labelFile, image_path)
+                    if state is True:
+                        self.fileListWidget.item(i).setCheckState(Qt.Checked)
+                    else:
+                        isLegendErr = state==0
+                        noErr = False
+            i+=1
+        
+        if canceled:                ## progress dialog canceled
+            if self.imagePath:
+                curr = self.imagePath
+            else:
+                curr = self.fileListWidget.currentItem().text()
+                
+            if curr:    
+                self.dirty = self.buffer[curr].get("dirty",False)
+                self.actions.save.setEnabled(self.dirty)
+            return
+
+
+        if not noErr:           ## error happened during save process
+            progress_dialog.close()
+            if isLegendErr:
+                self.undoSavedFiles(i)
+            return
+
+        self.allDirty = False
+        self.dirty = False
+        self.actions.save.setEnabled(False)
+        self.actions.saveAll.setEnabled(False)
+        progress_dialog.setValue(self.fileListWidget.count())
+
+    def bufferCurrentStatus(self):
+        assert self.imagePath, "Can not Buffer empty image."
+
+        shapes = [item.shape() for item in self.labelList]
+        flags = {}
+        for i in range(self.flag_widget.count()):
+            item = self.flag_widget.item(i)
+            key = item.text()
+            flag = item.checkState() == Qt.Checked
+            flags[key] = flag
+
+        self.buffer[self.imagePath]["shapes"] = shapes      # list
+        self.buffer[self.imagePath]["flags"] = flags        # dict
+        self.buffer[self.imagePath]["dirty"] = self.dirty   # bool
 
     def toggleAllBtns(self):
         i=0
@@ -2589,172 +2763,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 next=False
             i+=1
         return next
-
-
-    def saveAllOutputFiles(self):
-        '''
-        Save all images found in files list
-        '''
-        #print("All files saved")
-        if self.fileListWidget.count()<=0:
-            self.actions.saveAll.setEnabled(False)
-            return
-
-        if self.outputFileFormat is None or not self.output_dir:
-            if not self.setSaveSettings():
-                return
-        
-        progress_dialog = QtWidgets.QProgressDialog("Saving files. Please wait...", "Cancel", 0, self.fileListWidget.count(), self)
-        progress_dialog.setWindowTitle("%s - Save Files" % __appname__)
-        progress_dialog.setWindowFlags(Qt.WindowTitleHint)
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        i=0
-        noErr = True
-        isLegendErr = False
-        canceled = False
-        while not canceled and noErr and i<self.fileListWidget.count():
-            progress_dialog.setValue(i)
-            if progress_dialog.wasCanceled():
-                canceled = True
-            else:
-                image_path = self.fileListWidget.item(i).text()
-                #print(i)
-                if self.buffer[image_path].get("dirty", False) and (self.buffer[image_path].get("shapes") or self.buffer[image_path].get("flags")):
-                    #print("Saving")
-                    labelFile = osp.splitext(image_path)[0] + LabelFile.outputSuffixes[self.outputFileFormat]
-                    labelFile = osp.join(self.output_dir,osp.basename(labelFile))
-                    state = self.saveLabels(labelFile, image_path)
-                    if state is True:
-                        self.fileListWidget.item(i).setCheckState(Qt.Checked)
-                    else:
-                        isLegendErr = state==0
-                        noErr = False
-            i+=1
-        
-        if canceled:
-            if self.imagePath:
-                curr = self.imagePath
-            else:
-                curr = self.fileListWidget.currentItem().text()
-                
-            if curr:    
-                self.dirty = self.buffer[curr]["dirty"]
-                self.actions.save.setEnabled(self.dirty)
-            return
-
-        if not noErr:
-            progress_dialog.close()
-            if isLegendErr:
-                self.undoSavedFiles(i)
-            return
-
-        self.allDirty = False
-        self.dirty = False
-        self.actions.save.setEnabled(False)
-        self.actions.saveAll.setEnabled(False)
-        progress_dialog.setValue(self.fileListWidget.count())
-        #progress_dialog.close()
-
-    def undoSavedFiles(self, lastFileIdx:int):
-        i = 0
-        while i<lastFileIdx:
-            self.buffer[self.fileListWidget.item(i).text()]["dirty"] = True
-            self.fileListWidget.item(i).setCheckState(Qt.Unchecked)
-            i+=1
-
-    def saveAllOutputFilesAs(self):
-        if self.fileListWidget.count()<=0:
-            self.actions.saveAllAs.setEnabled(False)
-            return
-        if self.output_dir:
-            defaultDir = self.output_dir
-        else:
-            defaultDir = osp.dirname(self.imagePath) if self.imagePath else None
-
-        legendPath = YoloLabelFile.outputLegendPath if YoloLabelFile.outputLegendPath else YoloLabelFile.inputlegendPath
-        
-        dialog = SaveDialog(1, dirPath=defaultDir, legendPath=legendPath, labels=self.uniqLabelList.labels)
-        legend = None
-        if dialog.exec_() == QtWidgets.QDialog.Accepted:
-            if dialog.selectedOption ==1:
-                if dialog.outputLegend:
-                    legend = dialog.outputLegend
-                elif dialog.selectedLegend:
-                    legend = YoloLabelFile.loadLegendFile(dialog.selectedLegend)
-        else:
-            return
-        
-        progress_dialog = QtWidgets.QProgressDialog("Saving files. Please wait...", "Cancel", 0, self.fileListWidget.count(), self)
-        progress_dialog.setWindowTitle("%s - Save Files" % __appname__)
-        progress_dialog.setWindowFlags(Qt.WindowTitleHint)
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        i=0
-        isLegendErr = False
-        noErr = True
-        canceled = False
-        while noErr and i<self.fileListWidget.count():
-            progress_dialog.setValue(i)
-            if progress_dialog.wasCanceled():
-                canceled = True
-                break
-            image_path = self.fileListWidget.item(i).text()
-            if self.buffer[image_path].get("shapes"):
-                #print("Saving")
-                labelFile = osp.splitext(image_path)[0] + LabelFile.outputSuffixes[dialog.selectedOption]
-                labelFile = osp.join(dialog.selectedDir,osp.basename(labelFile))
-                if legend:
-                    YoloLabelFile.tempLegend = legend
-
-                state = self.saveLabels(labelFile, image_path)
-                if state is True:
-                    self.fileListWidget.item(i).setCheckState(Qt.Checked)
-                else:
-                    isLegendErr = state==0
-                    noErr = False
-            i+=1
-        
-        if canceled:
-            if self.imagePath:
-                curr = self.imagePath
-            else:
-                curr = self.fileListWidget.currentItem().text()
-                
-            if curr:    
-                self.dirty = self.buffer[curr]["dirty"]
-                self.actions.save.setEnabled(self.dirty)
-            return
-
-
-        if not noErr:
-            progress_dialog.close()
-            if isLegendErr:
-                self.undoSavedFiles(i)
-            return
-
-        self.allDirty = False
-        self.dirty = False
-        self.actions.save.setEnabled(False)
-        self.actions.saveAll.setEnabled(False)
-        progress_dialog.setValue(self.fileListWidget.count())
-        #progress_dialog.close()
-
-    def bufferCurrentStatus(self):
-        assert self.imagePath, "Can not Buffer empty image."
-
-        shapes = [item.shape() for item in self.labelList]
-        flags = {}
-        for i in range(self.flag_widget.count()):
-            item = self.flag_widget.item(i)
-            key = item.text()
-            flag = item.checkState() == Qt.Checked
-            flags[key] = flag
-
-        self.buffer[self.imagePath]["shapes"] = shapes      # list
-        self.buffer[self.imagePath]["flags"] = flags        # dict
-        self.buffer[self.imagePath]["dirty"] = self.dirty   # bool
-        #self.buffer[self.imagePath]["undo"] = self.canvas.shapesBackups # list
 
     def toLoadLegend(self):
         msg = QtWidgets.QMessageBox(self)
@@ -3120,12 +3128,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.errorMessage(
                         self.tr("Error opening label file"),
                         self.tr(
-                            "<p><b>%s</b></p>"
-                            "<p>Make sure <i>%s</i> is a valid label file."
+                            "<p><b>Error happend when loading label file</b></p>"
+                            "<p>Make sure <i>%s</i> is a valid labelme label file."
                         )
                         % (e, label_file),
                     )
-                    self.status(self.tr("Error reading %s") % label_file)
+                    #self.status(self.tr("Error reading %s") % label_file)
                 else:
                     logger.error("Error happened reading %s" % label_file)
                 return
@@ -3147,16 +3155,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.buffer[imagePath]["image_size"]= LabelFile.getImageSize(imagePath)
 
             
-            labelFile.imageWidth = self.buffer[imagePath]["image_size"][0]
-            labelFile.imageHeight = self.buffer[imagePath]["image_size"][1]
+            imageWidth = self.buffer[imagePath]["image_size"][0]
+            imageHeight = self.buffer[imagePath]["image_size"][1]
 
             try:
-                labelFile.load(label_file)
+                labelFile.load(label_file, imageWidth, imageHeight)
             except LabelFileError as e:
                 if showError:
-                    self.errorMessage("Error Reading Label File",
-                                  "Make sure the label file '%s' has a correct Yolo format." % label_file
+                    self.errorMessage(
+                        self.tr("Error opening label file"),
+                        self.tr(
+                            "<p><b>Error happend when loading label file</b></p>"
+                            "<p>Make sure <i>%s</i> is a valid YOLO label file."
+                        )
+                        % (e, label_file),
                     )
+                    #self.status(self.tr("Error reading %s") % label_file)
                 else:
                     logger.error("Error happened when reading %s" % label_file)
                 return
@@ -3176,13 +3190,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 if self.buffer[imagePath].get("image_size",None) is None:
                     self.buffer[imagePath]["image_size"]= LabelFile.getImageSize(imagePath)
 
-                labelFile.imageWidth = self.buffer[imagePath]["image_size"][0]
-                labelFile.imageHeight = self.buffer[imagePath]["image_size"][1]
-                labelFile.load(frameIdx=id, framesCount=self.fileListWidget.count())
-            except:
+                imageWidth = self.buffer[imagePath]["image_size"][0]
+                imageHeight = self.buffer[imagePath]["image_size"][1]
+                labelFile.load(imageWidth=imageWidth, imageHeight=imageHeight, frameIdx=id, framesCount=self.fileListWidget.count())
+            except LabelFileError as e:
                 if showError:
-                    self.errorMessage("Error Reading Label File",
-                                  "Make sure the video label file '%s' has a correct format." % VideoLabelFile.labelFilePath
+                    self.errorMessage(
+                        self.tr("Error opening label file"),
+                        self.tr(
+                            "<p><b>Error happend when loading label file</b></p>"
+                            "<p>Make sure <i>%s</i> is a valid label studio label file for video frames."
+                        )
+                        % (e, VideoLabelFile.labelFilePath),
                     )
                 else:
                     logger.error("Error happened when reading %s" % VideoLabelFile.labelFilePath)
@@ -3193,7 +3212,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.buffer[imagePath]["dirty"] = False
         
     def loadLabelFiles(self):
-        if not self.imagePath and self.fileListWidget.count()<=0:
+        if not self.imagePath or self.fileListWidget.count()==0:
             return
         
         if not self.mayContinue():
@@ -3237,11 +3256,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.loadFile(self.imagePath)
 
     def openAnnotationFile(self):
+        if not self.imagePath:
+            return
+        
         if not self.noShapes():
             if not self.replaceShapes():
                 return
-            
+
         dirpath = osp.dirname(self.imagePath) if self.imagePath else "."
+        initialName = osp.basename(osp.splitext(self.imagePath)[0] + ".json")
+        initialName = osp.join(dirpath,initialName)
         filters = ";;".join(
             [f"{fmt} Format (*{ext})" for fmt, ext in LabelFile.outputFormats.items()]
         )
@@ -3249,7 +3273,7 @@ class MainWindow(QtWidgets.QMainWindow):
         selectedFilePath, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             self.tr("%s - Choose Label file") % __appname__,
-            dirpath,
+            initialName,
             filters,
         )
         if not selectedFilePath:
@@ -3273,10 +3297,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     else:
                         YoloLabelFile.tempLegend = None
 
-            self.labelFileLoaders.get(1)(self.imagePath,selectedFilePath,True)
-            #self.lblFileLoaders.get(1)(None,selectedFilePath,True)
+            self.labelFileLoaders.get(1)(self.imagePath,selectedFilePath,None,True)
         else:
-            self.labelFileLoaders.get(0)(self.imagePath,selectedFilePath,True)
+            self.labelFileLoaders.get(0)(self.imagePath,selectedFilePath,None,True)
         
         self.labelList.clear()
         self.loadFile(self.imagePath)
@@ -3310,7 +3333,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.labelList.clear()
         self.loadLabels(res,True)
-        #self.loadShapes(self.formatPredictedShapes(res))
         self.yoloModel.model = None
         self._runYoloButton.setEnabled(True)
         self.actions.editMode.setEnabled(True)
@@ -3338,11 +3360,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._runYoloVidButton.setEnabled(True)
             return
         
-        progress = QtWidgets.QProgressDialog("Running Model on images", "Cancel", 0, self.fileListWidget.count(), self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-
-        #images = self.buffer.keys()
+        progress = ProgressDialog("Running Model on images...",self.fileListWidget.count(),self)
 
         for i in range(self.fileListWidget.count()):
             image = self.fileListWidget.item(i).text()
@@ -3386,10 +3404,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._runYoloTrackButton.setEnabled(True)
             return
 
-        progress = QtWidgets.QProgressDialog("Running Model on Frames", "Cancel", 0, self.fileListWidget.count(), self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.setValue(0)
+        progress = ProgressDialog("Running Model on frames...",self.fileListWidget.count(),self)
         
         ## clear all annotations for all images.
         for i in range(self.fileListWidget.count()):
@@ -3423,36 +3438,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions.undo.setEnabled(True)
         self.actions.saveAll.setEnabled(True)
         self.setDirty()
-
-    # def formatPredictedShapes(self, shapes):
-    #     s = []
-    #     for shape in shapes:
-    #         label = shape["label"]
-    #         points = shape["points"]
-    #         shape_type = shape["shape_type"]
-    #         group_id = shape["group_id"]
-
-    #         if not points:
-    #             # skip point-empty shape
-    #             continue
-
-    #         shape = Shape(
-    #             label=label,
-    #             shape_type=shape_type,
-    #             group_id=group_id,
-    #             description="",
-    #             mask = shape["mask"],
-    #         )
-
-    #         for x, y in points:
-    #             shape.addPoint(QtCore.QPointF(x, y))
-    #         shape.close()
-
-    #         shape.flags = {}
-    #         shape.other_data = {}
-    #         s.append(shape)
-
-    #     return s
 
     def selectObjModel(self):
         defaultPath = osp.dirname(self.yoloModel.modelPath) if self.yoloModel.modelPath else "."
@@ -3654,6 +3639,10 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if not is_last:
             self.errorMessage("Error", "No previous annotated frame found!")
+            return
+        
+        if len(images)==0:
+            self.errorMessage("Fill Gap failed","No non annotated frames found!")
             return
         
         ## startIds > imgIdx , first: imgIdx >> last: startIdx

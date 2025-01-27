@@ -6,14 +6,20 @@ from os import path as osp
 
 
 class SaveSettingDialog(QDialog):
-    def __init__(self,selectedOption:int=0, dirPath:str=None, legendPath:str=None, saveAuto:bool=True, labels:list=None):
+    def __init__(self,selectedOption:int=0,
+                 dirPath:str=None,
+                 legendPath:str=None,
+                 saveAuto:bool=True,
+                 labels:list=None,
+                 legend:dict=None
+        ):
         super().__init__()
         self.selectedOption = selectedOption if selectedOption else 0
         self.selectedDir = dirPath
         self.selectedLegend = legendPath
         self.saveAuto = saveAuto
         self.labels = labels
-        self.outputLegend = {}
+        self.outputLegend = legend if legend else {}
         self.setWindowTitle("%s - Save Settings" % __appname__)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(400,250)
@@ -92,8 +98,10 @@ class SaveSettingDialog(QDialog):
         h_layoutLine.addWidget(rightLine, 1)
         ## Generate Legend
         generateBtn = QPushButton("Generate Legend")
-        self.retLbl = QLabel("Your Legend has been generated successfully")
-        self.retLbl.setStyleSheet("color: #0F0;")
+        #self.retLbl = QLabel("Your Legend has been generated successfully")
+        self.retLbl = QLabel("You have generated a class legend")
+        self.retLbl.setStyleSheet("color: #6bb24f;")
+        self.retLbl.setAlignment(Qt.AlignCenter)
         self.retLbl.setVisible(False)
         notLbl = QLabel("<strong>Note:</strong> Classes must be in seperated lines.")
         hLayout3.addWidget(self.legendPathEditTxt)
@@ -165,7 +173,7 @@ class SaveSettingDialog(QDialog):
             self.outputLegend = {}
             if dialog.legend_data:
                 for key, val in dialog.legend_data.items():
-                    self.outputLegend[val.lower()] = key
+                    self.outputLegend[val] = key
             if dialog.savedLegendPath:
                 self.legendPathEditTxt.setText(dialog.savedLegendPath)
                 self.selectedLegend = dialog.savedLegendPath
@@ -236,9 +244,9 @@ class SaveSettingDialog(QDialog):
         if selectedFilePath:
             if self.retLbl.isVisible():
                 msg = QMessageBox
-                replay = msg.question(
+                replay = msg.warning(
                     None,
-                    "Warning",
+                    "Attention",
                     "You already have generated a legend. Do you want to ignore it?",
                     msg.Yes | msg.Cancel,
                     msg.Yes,
@@ -246,11 +254,10 @@ class SaveSettingDialog(QDialog):
                 if replay == msg.Cancel:
                     return
                 
-                self.outputLegend = {}
-                self.retLbl.setVisible(False)
-                self.adjustSize()
-
+            self.outputLegend.clear()
+            self.retLbl.setVisible(False)
             self.legendPathEditTxt.setText(selectedFilePath)
+            self.adjustSize()
 
     def formatSelectionChanged(self):
         self.widget3.setVisible(self.comboBox.currentIndex()==1)
