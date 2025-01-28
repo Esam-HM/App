@@ -1,4 +1,4 @@
-<h1 align="center">
+<h1 align="center" style="color: #000;">
   <img src="myLabelme/icons/icon.png"><br/>labelme-ytu
 </h1>
 
