@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="myLabelme/icons/icon.png"><br/>labelme
+  <img src="myLabelme/icons/icon.png"><br/>labelme-ytu
 </h1>
 
 <h4 align="center">
