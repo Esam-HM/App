@@ -86,7 +86,7 @@ class GenerateLegendDialog(QDialog):
 
         self.saveBtn.clicked.connect(self.saveFile)
         cancelBtn.clicked.connect(self.reject)
-        self.completeBtn.clicked.connect(self.accept)
+        self.completeBtn.clicked.connect(self.completeBtnPressed)
 
         if self.labels:
             self.labelList.addItems(self.labels)
@@ -100,7 +100,7 @@ class GenerateLegendDialog(QDialog):
                 if items:
                     row = self.labelList.row(items[0])
                     self.labelList.takeItem(row)
-            print(f"legend generated: {self.legend_data}")
+            print(f"legend generated from prev: {self.legend_data}")
 
     def saveFile(self):
         self.savedLegendPath, _ = QFileDialog.getSaveFileName(self, "Save Legend File", self.dir, "TXT Files (*.txt)")
@@ -112,15 +112,19 @@ class GenerateLegendDialog(QDialog):
         
         keys = sorted(self.legend_data.keys())
 
+        if not self.isIDsSequential():
+            QMessageBox.warning(self, "Error", "Your IDs must be sequential to save.")
+            return
+
         try:
             with open(self.savedLegendPath, "w") as f:
                 for key in keys:
-                    f.write(self.legend_data[key].title() + "\n")
+                    f.write(self.legend_data[key] + "\n")
                     # if i<len(keys):
                     #     f.write("\n")
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", "Could not save legend file in %s" % self.savedLegendPath)
+            QMessageBox.critical(self, "Error", f"<p>{e}<b></b>Could not save legend file in {self.savedLegendPath}<p>")
             self.savedLegendPath = None
 
     def addItemToTextWidget(self):
@@ -142,7 +146,7 @@ class GenerateLegendDialog(QDialog):
             self.showError("ID cannot be empty!")
             return
 
-        if id in self.legend_data:
+        if int(id) in self.legend_data:
             self.showError(f"ID: '{id}' already added!")
             return
         
@@ -202,3 +206,21 @@ class GenerateLegendDialog(QDialog):
         flag = self.table.rowCount()>0
         self.saveBtn.setEnabled(flag)
         self.completeBtn.setEnabled(flag)
+
+    def isIDsSequential(self):
+        keys = sorted(self.legend_data.keys())
+        return all(keys[i] + 1 == keys[i + 1] for i in range(len(keys) - 1))
+    
+
+    def completeBtnPressed(self):
+        if not self.isIDsSequential():
+            QMessageBox.critical(self, "Error", "Your IDs must be sequential.")
+            return
+        else:
+            self.accept()
+
+
+    def showEvent(self, a0):
+        super().showEvent(a0)
+        self.toggleBtns()
+    

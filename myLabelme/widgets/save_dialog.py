@@ -156,6 +156,21 @@ class SaveDialog(QDialog):
         self.adjustSize()
     
     def generateLegend(self):
+        if self.legendPathEditTxt.text():
+            msg = QMessageBox
+            replay = msg.warning(
+                None,
+                "Attention",
+                "There is a specified legend file path. Do you want to ignore it?",
+                msg.Yes | msg.Cancel,
+                msg.Yes,
+            )
+            if replay == msg.Cancel:
+                return
+            
+        self.selectedLegend = None
+        self.legendPathEditTxt.setText("")
+
         dialog = GenerateLegendDialog(self.labels, self.selectedDir, self.outputLegend)
 
         if dialog.exec_() == QDialog.Accepted:
@@ -163,9 +178,6 @@ class SaveDialog(QDialog):
             if dialog.legend_data:
                 for key, val in dialog.legend_data.items():
                     self.outputLegend[val] = key
-            if dialog.savedLegendPath:
-                self.legendPathEditTxt.setText(dialog.savedLegendPath)
-                self.selectedLegend = dialog.savedLegendPath
 
         if self.outputLegend:
             self.retLbl.setVisible(True)
@@ -225,8 +237,23 @@ class SaveDialog(QDialog):
             self.dirpathEditTxt.setText(targetPath)
 
     def selectLegendFile(self):
+        if self.retLbl.isVisible():
+            msg = QMessageBox
+            replay = msg.warning(
+                None,
+                "Warning",
+                "You already have generated a legend. Do you want to ignore it?",
+                msg.Yes | msg.Cancel,
+                msg.Yes,
+            )
+            if replay == msg.Cancel:
+                return
+            
+        self.outputLegend.clear()
+        self.retLbl.setVisible(False)
+        self.adjustSize()
+        
         defaultDir = self.legendPathEditTxt.text() if self.legendPathEditTxt.text() else "."
-
         selectedFilePath, _ = QFileDialog.getOpenFileName(
             self,
             self.tr("%s - Select Legend File") % __appname__,
@@ -234,23 +261,9 @@ class SaveDialog(QDialog):
             self.tr("File (*.txt)"),
         )
 
-        if selectedFilePath:
-            if self.retLbl.isVisible():
-                msg = QMessageBox
-                replay = msg.warning(
-                    None,
-                    "Warning",
-                    "You already have generated a legend. Do you want to ignore it?",
-                    msg.Yes | msg.Cancel,
-                    msg.Yes,
-                )
-                if replay == msg.Cancel:
-                    return
-                
-            self.outputLegend.clear()
-            self.retLbl.setVisible(False)   
+        if selectedFilePath:     
             self.legendPathEditTxt.setText(selectedFilePath)
-            self.adjustSize()
+            
 
     def formatSelectionChanged(self):
         self.widget3.setVisible(self.comboBox.currentIndex()==1)
@@ -275,5 +288,6 @@ class SaveDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.retLbl.setVisible(self.outputLegend!={})
         self.formatSelectionChanged()
         self.isDirPathEmpty()

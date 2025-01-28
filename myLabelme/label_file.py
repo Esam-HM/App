@@ -403,9 +403,14 @@ class YoloLabelFile(LabelFile):
 
             return legend
         except Exception as e:
-            logger.error(
-                "Error reading legend file."
+            QMessageBox.critical(
+                None, 
+                "Error Loading Legend", 
+                "<p>Please ensure that you have provided a valid legend file.<br>The legend file must be in <em>.txt</em> format, with each class written on a separate line.</p>"
             )
+            #logger.error(
+            #    "Error reading legend file."
+            #)
             return
     
 
