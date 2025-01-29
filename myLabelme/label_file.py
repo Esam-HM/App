@@ -249,16 +249,18 @@ class YoloLabelFile(LabelFile):
             if data:
                 pp = self.formatYoloData(data, imageWidth, imageHeight)
                 if pp is None:
+                    YoloLabelFile.tempLegend = None
                     raise LabelFileError("Not valid yolo label file")
 
                 shape = {}
                 shape["group_id"] = None
                 shape["label"] = str(pp[0])
                 if YoloLabelFile.tempLegend is not None:
+                    print(f"loaded from temp legend {YoloLabelFile.tempLegend}")
                     shape["label"] = YoloLabelFile.tempLegend[pp[0]] if len(YoloLabelFile.tempLegend)> pp[0] else str(pp[0])
                 else:
                     shape["label"] = YoloLabelFile.inputLegend[pp[0]] if len(YoloLabelFile.inputLegend)> pp[0] else str(pp[0])
-                
+                    print(f"loaded from input legend {YoloLabelFile.inputLegend}")
                 shape["shape_type"] = "rectangle"
                 shape["points"] = []
 
@@ -322,6 +324,7 @@ class YoloLabelFile(LabelFile):
                             "Error",
                             f"<p>Could not found label '{shape["label"]}' in the provided legend.<br> Please check and regenerate your legend from change save settings under file menu and try again.</p>",
                         )
+                        YoloLabelFile.tempLegend = None
                         raise LegendError
                     print(f"saved with tempLegend: {YoloLabelFile.tempLegend}")
                 elif YoloLabelFile.outputLegend:

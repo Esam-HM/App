@@ -124,7 +124,7 @@ class GenerateLegendDialog(QDialog):
                     #     f.write("\n")
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"<p>{e}<b></b>Could not save legend file in {self.savedLegendPath}<p>")
+            QMessageBox.critical(self, "Error", f"<p><b>{e}</b></p><p>Could not save legend file in {self.savedLegendPath}</p>")
             self.savedLegendPath = None
 
     def addItemToTextWidget(self):

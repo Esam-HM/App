@@ -253,7 +253,9 @@ class SaveDialog(QDialog):
         self.retLbl.setVisible(False)
         self.adjustSize()
         
-        defaultDir = self.legendPathEditTxt.text() if self.legendPathEditTxt.text() else "."
+        defaultDir = self.legendPathEditTxt.text() if self.legendPathEditTxt.text() else self.dirpathEditTxt.text()
+        defaultDir = defaultDir if defaultDir else "."
+        #defaultDir = self.dirpathEditTxt.text() if self.dirpathEditTxt.text() else self.selectedDir
         selectedFilePath, _ = QFileDialog.getOpenFileName(
             self,
             self.tr("%s - Select Legend File") % __appname__,

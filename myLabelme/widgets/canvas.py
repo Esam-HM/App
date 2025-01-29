@@ -458,7 +458,7 @@ class Canvas(QtWidgets.QWidget):
                         width, height = self.boxWidth/2 , self.boxHeight/2
                         top_left = QtCore.QPointF(pos.x() - width, pos.y() - height)
                         bottom_right = QtCore.QPointF(pos.x() + width, pos.y() + height)
-                        print("canvas",top_left.x()-bottom_right.x(), top_left.y() - bottom_right.y())
+                        #print("canvas",top_left.x()-bottom_right.x(), top_left.y() - bottom_right.y())
                         if not self.outOfPixmap(top_left) and not self.outOfPixmap(bottom_right):
                             self.current.points = [top_left, bottom_right]
                             self.finalise()
