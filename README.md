@@ -76,6 +76,8 @@ python setup.py
 ```bash
 python -m labelme-ytu
 ```
+## Poster:
+https://drive.google.com/drive/folders/1PpUx1wxzBsQodd4jpDi00KJsg-LKW5Yy
 
 ## Authors
 
